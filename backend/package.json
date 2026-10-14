@@ -11,5 +11,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1151.0",
+    "@aws-sdk/lib-dynamodb": "^3.1151.0"
   }
 }
