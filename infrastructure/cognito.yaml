@@ -1,0 +1,106 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TickDesk Cognito authentication infrastructure
+
+Resources:
+
+  TicketingUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: tickdesk-poc-users
+      UserPoolTier: ESSENTIALS
+      DeletionProtection: ACTIVE
+
+      UsernameAttributes:
+        - email
+
+      UsernameConfiguration:
+        CaseSensitive: false
+
+      AutoVerifiedAttributes:
+        - email
+
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  CustomerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Customer
+      Description: Ticketing system customers
+      UserPoolId: !Ref TicketingUserPool
+
+  AgentGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: Agent
+      Description: Ticketing system support agents
+      UserPoolId: !Ref TicketingUserPool
+
+  TicketingClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: tickdesk-vue-client
+      UserPoolId: !Ref TicketingUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs:
+        - http://localhost:5173/auth/callback
+      LogoutURLs:
+        - http://localhost:5173/
+
+  TicketingDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 'tickdesk-${AWS::AccountId}-${AWS::Region}'
+      UserPoolId: !Ref TicketingUserPool
+      ManagedLoginVersion: 2
+
+  TicketingLoginBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    DependsOn: TicketingDomain
+    Properties:
+      UserPoolId: !Ref TicketingUserPool
+      ClientId: !Ref TicketingClient
+      UseCognitoProvidedValues: true
+
+Outputs:
+
+  UserPoolId:
+    Value: !Ref TicketingUserPool
+
+  UserPoolClientId:
+    Value: !Ref TicketingClient
+
+  CognitoLoginDomain:
+    Value: !Sub
+      - 'https://${Domain}.auth.${AWS::Region}.amazoncognito.com'
+      - Domain: !Ref TicketingDomain
+
+  CognitoIssuer:
+    Value: !Sub
+      - 'https://cognito-idp.${AWS::Region}.amazonaws.com/${PoolId}'
+      - PoolId: !Ref TicketingUserPool
