@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "seed": "node src/seed.js",
-    "test": "node --test tests/",
+    "test": "node --test",
     "smoke:dynamodb": "node scripts/smokeDynamo.mjs"
   },
   "engines": {
