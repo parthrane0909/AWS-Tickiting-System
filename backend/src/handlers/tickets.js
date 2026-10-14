@@ -88,12 +88,12 @@ export async function handleRequest(req, res) {
     // POST /api/tickets
     if (method === "POST" && path === "/api/tickets") {
       const body = await readJsonBody(req);
-      return sendJson(res, 201, { data: service.create(body, user) });
+      return sendJson(res, 201, { data: await service.create(body, user) });
     }
     // GET /api/tickets (list)
     if (method === "GET" && path === "/api/tickets") {
       const q = sanitizeListQuery(queryOf(url));
-      const result = service.list(q, user);
+      const result = await service.list(q, user);
       return sendJson(res, 200, { data: result.items, meta: { total: result.total, page: result.page, limit: result.limit } });
     }
     // Ticket-scoped routes
@@ -101,13 +101,13 @@ export async function handleRequest(req, res) {
     if (m) {
       const ticketId = decodeURIComponent(m[1]);
       const sub = m[3];
-      if (method === "GET" && !sub) return sendJson(res, 200, { data: service.get(ticketId, user) });
+      if (method === "GET" && !sub) return sendJson(res, 200, { data: await service.get(ticketId, user) });
       if (method === "PUT" && !sub) {
         const body = await readJsonBody(req);
-        return sendJson(res, 200, { data: service.update(ticketId, body, user) });
+        return sendJson(res, 200, { data: await service.update(ticketId, body, user) });
       }
       if (method === "GET" && sub === "attachment") {
-        const file = service.downloadAttachment(ticketId, user);
+        const file = await service.downloadAttachment(ticketId, user);
         res.writeHead(200, {
           "content-type": file.mimeType,
           "content-length": file.bytes.length,
@@ -116,12 +116,12 @@ export async function handleRequest(req, res) {
         res.end(file.bytes);
         return;
       }
-      if (method === "GET" && sub === "comments") return sendJson(res, 200, { data: service.listComments(ticketId, user) });
+      if (method === "GET" && sub === "comments") return sendJson(res, 200, { data: await service.listComments(ticketId, user) });
       if (method === "POST" && sub === "comments") {
         const body = await readJsonBody(req);
-        return sendJson(res, 201, { data: service.addComment(ticketId, body, user) });
+        return sendJson(res, 201, { data: await service.addComment(ticketId, body, user) });
       }
-      if (method === "GET" && sub === "history") return sendJson(res, 200, { data: service.history(ticketId, user) });
+      if (method === "GET" && sub === "history") return sendJson(res, 200, { data: await service.history(ticketId, user) });
     }
     return sendJson(res, 404, { error: { message: "Not found." } });
   } catch (err) {

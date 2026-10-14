@@ -13,7 +13,7 @@ const DEMO = [
   { title: "[DEMO] Mobile layout breaks on ticket detail", description: "On 390px wide screens the comment box overflows the card padding.", priority: "MEDIUM", category: "TECHNICAL" },
 ];
 
-export function ensureSeeded() {
+export async function ensureSeeded() {
   const existing = loadDb();
   if (existing.tickets.length > 0) return { seeded: false };
   const repo = createRepository();
@@ -21,22 +21,22 @@ export function ensureSeeded() {
   const alice = DEV_USERS.find((u) => u.id === "cust_alice");
   const bob = DEV_USERS.find((u) => u.id === "cust_bob");
   const eve = DEV_USERS.find((u) => u.id === "agent_eve");
-  DEMO.forEach((d, i) => {
+  for (const [i, d] of DEMO.entries()) {
     const owner = i % 2 === 0 ? alice : bob;
-    const t = service.create(d, owner);
+    const t = await service.create(d, owner);
     if (i === 0) {
-      service.update(t.id, { status: "IN_PROGRESS", assigneeId: eve.id }, eve);
-      service.addComment(t.id, { body: "Thanks — I'm looking into the invoice service now." }, eve);
-      service.addComment(t.id, { body: "Appreciate the quick response!" }, owner);
+      await service.update(t.id, { status: "IN_PROGRESS", assigneeId: eve.id }, eve);
+      await service.addComment(t.id, { body: "Thanks — I'm looking into the invoice service now." }, eve);
+      await service.addComment(t.id, { body: "Appreciate the quick response!" }, owner);
     }
-    if (i === 1) service.update(t.id, { status: "IN_PROGRESS", assigneeId: eve.id }, eve);
-    if (i === 3) service.update(t.id, { status: "RESOLVED", assigneeId: eve.id }, eve);
-  });
+    if (i === 1) await service.update(t.id, { status: "IN_PROGRESS", assigneeId: eve.id }, eve);
+    if (i === 3) await service.update(t.id, { status: "RESOLVED", assigneeId: eve.id }, eve);
+  }
   return { seeded: true, count: DEMO.length };
 }
 
 // Allow `npm run seed` to force-check seeding.
 if (process.argv[1]?.endsWith("seed.js")) {
-  const r = ensureSeeded();
+  const r = await ensureSeeded();
   console.log(r.seeded ? `[seed] inserted ${r.count} demo tickets` : "[seed] db already populated, skipping");
 }

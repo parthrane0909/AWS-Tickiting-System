@@ -23,22 +23,22 @@ const valid = {
   category: "TECHNICAL",
 };
 
-test("customer can create; agent cannot (incl. crafted requests)", () => {
+test("customer can create; agent cannot (incl. crafted requests)", async () => {
   const svc = freshService();
-  assert.match(svc.create(valid, alice).id, /^TIX-/);
-  assert.throws(() => svc.create(valid, eve), (e) => e.status === 403);
+  assert.match((await svc.create(valid, alice)).id, /^TIX-/);
+  await assert.rejects(() => svc.create(valid, eve), (e) => e.status === 403);
   // Crafted: agent smuggling owner fields still rejected.
-  assert.throws(
+  await assert.rejects(
     () => svc.create({ ...valid, customerId: "cust_alice", status: "OPEN", role: "customer" }, eve),
     (e) => e.status === 403,
   );
 });
 
-test("customer can edit own ticket; immutable/system fields rejected", () => {
+test("customer can edit own ticket; immutable/system fields rejected", async () => {
   const svc = freshService();
-  const t = svc.create(valid, alice);
+  const t = await svc.create(valid, alice);
   const before = t.updatedAt;
-  const saved = svc.update(t.id, { title: "Login fails often", priority: "URGENT" }, alice);
+  const saved = await svc.update(t.id, { title: "Login fails often", priority: "URGENT" }, alice);
   assert.equal(saved.title, "Login fails often");
   assert.equal(saved.priority, "URGENT");
   assert.ok(saved.updatedAt >= before);
@@ -51,36 +51,36 @@ test("customer can edit own ticket; immutable/system fields rejected", () => {
     { id: "TIX-FAKE" },
     { createdAt: "2000-01-01" },
   ]) {
-    assert.throws(() => svc.update(t.id, body, alice), (e) => e.status === 403, JSON.stringify(body));
+    await assert.rejects(() => svc.update(t.id, body, alice), (e) => e.status === 403, JSON.stringify(body));
   }
-  assert.equal(svc.get(t.id, alice).status, "OPEN");
+  assert.equal((await svc.get(t.id, alice)).status, "OPEN");
 });
 
-test("customer cannot edit another customer's ticket", () => {
+test("customer cannot edit another customer's ticket", async () => {
   const svc = freshService();
-  const t = svc.create(valid, alice);
-  assert.throws(() => svc.update(t.id, { title: "Hijacked" }, bob), (e) => e.status === 403);
+  const t = await svc.create(valid, alice);
+  await assert.rejects(() => svc.update(t.id, { title: "Hijacked" }, bob), (e) => e.status === 403);
 });
 
-test("agent manages workflow but cannot edit ticket details", () => {
+test("agent manages workflow but cannot edit ticket details", async () => {
   const svc = freshService();
-  const t = svc.create(valid, alice);
-  const updated = svc.update(t.id, { status: "IN_PROGRESS", assigneeId: "agent_eve" }, eve);
+  const t = await svc.create(valid, alice);
+  const updated = await svc.update(t.id, { status: "IN_PROGRESS", assigneeId: "agent_eve" }, eve);
   assert.equal(updated.status, "IN_PROGRESS");
   assert.equal(updated.assigneeId, "agent_eve");
   for (const body of [{ title: "Agent rewrite" }, { description: "Agent rewrite long enough." }, { priority: "LOW" }, { category: "BILLING" }]) {
-    assert.throws(() => svc.update(t.id, body, eve), (e) => e.status === 403, JSON.stringify(body));
+    await assert.rejects(() => svc.update(t.id, body, eve), (e) => e.status === 403, JSON.stringify(body));
   }
-  assert.equal(svc.get(t.id, eve).title, valid.title);
+  assert.equal((await svc.get(t.id, eve)).title, valid.title);
 });
 
-test("customer edit recorded as activity; list isolation intact", () => {
+test("customer edit recorded as activity; list isolation intact", async () => {
   const svc = freshService();
-  const t = svc.create(valid, alice);
-  svc.update(t.id, { title: "New title here" }, alice);
-  const types = svc.history(t.id, alice).map((a) => a.type);
+  const t = await svc.create(valid, alice);
+  await svc.update(t.id, { title: "New title here" }, alice);
+  const types = (await svc.history(t.id, alice)).map((a) => a.type);
   assert.ok(types.includes("edited"));
-  assert.equal(svc.list({ page: 1, limit: 20 }, alice).total, 1);
-  assert.equal(svc.list({ page: 1, limit: 20 }, bob).total, 0);
-  assert.equal(svc.list({ page: 1, limit: 20 }, eve).total, 1);
+  assert.equal((await svc.list({ page: 1, limit: 20 }, alice)).total, 1);
+  assert.equal((await svc.list({ page: 1, limit: 20 }, bob)).total, 0);
+  assert.equal((await svc.list({ page: 1, limit: 20 }, eve)).total, 1);
 });

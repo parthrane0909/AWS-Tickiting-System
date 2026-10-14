@@ -4,7 +4,7 @@ import { createStorage } from "./adapters/storage/localAttachments.js";
 import { ensureSeeded } from "./seed.js";
 
 const port = Number(process.env.PORT || 3001);
-ensureSeeded();
+await ensureSeeded();
 // Recovery: drop files uploaded but never linked to a ticket (e.g. ticket
 // creation failed after upload). Documented in README.
 const reaped = createStorage(resolveDataDir()).reapOrphans();
