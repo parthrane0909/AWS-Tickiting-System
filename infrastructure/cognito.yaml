@@ -1,6 +1,5 @@
 
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
 Description: TickDesk Cognito authentication infrastructure
 
 Resources:
@@ -9,6 +8,8 @@ Resources:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: tickdesk-poc-users
+      UserPoolTags:
+        Project: TickDeskPOC
       UserPoolTier: ESSENTIALS
       DeletionProtection: ACTIVE
 
