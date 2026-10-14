@@ -4,13 +4,19 @@ import { resolveDataDir } from "../adapters/persistence/jsonStore.js";
 import { createStorage } from "../adapters/storage/localAttachments.js";
 import { authenticate } from "../middleware/auth.js";
 import { readJsonBody, sendError, sendJson } from "../middleware/json.js";
-import { createRepository } from "../repositories/ticketRepository.js";
+import { createConfiguredRepository } from "../repositories/configuredRepository.js";
 import { createTicketService } from "../services/ticketService.js";
 import { badRequest, forbidden } from "../utils/errors.js";
 
 const dataDir = resolveDataDir();
-const repo = createRepository(dataDir);
-const storage = createStorage(dataDir);
+const persistenceBackend = process.env.PERSISTENCE_BACKEND || "json";
+const repo = createConfiguredRepository({
+  backend: persistenceBackend,
+  dataDir
+});
+const storage = persistenceBackend === "json"
+  ? createStorage(dataDir)
+  : null;
 const service = createTicketService(repo, storage);
 
 // Upload bodies carry base64 file bytes; all other JSON bodies stay small.
@@ -82,6 +88,11 @@ export async function handleRequest(req, res) {
     // Replaces the former presigned-url stub, which returned a fake URL.
     if (method === "POST" && path === "/api/attachments") {
       if (user.role !== "customer") throw forbidden("Only customers can upload attachments.");
+      if (!storage) {
+        return sendJson(res, 501, {
+          error: { message: "Attachments require S3 in DynamoDB mode." }
+        });
+      }
       const body = await readJsonBody(req, UPLOAD_BODY_LIMIT);
       return sendJson(res, 201, { data: storage.store(body, user.id) });
     }
