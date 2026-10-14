@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build output
+dist/
+coverage/
+
+# AWS local/generated files
+.aws/
+.aws-sam/
+.serverless/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local editor and OS files
+.vscode/
+.DS_Store
+
+node_modules/
+backend/data/db.json
+dist/
+.env

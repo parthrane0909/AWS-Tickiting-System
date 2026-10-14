@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-canvas text-ink font-sans antialiased;
+}
+
+/* ---- Shared motion system: restrained fades, short durations ---- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -12px, 0); }
+}
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.7; }
+  50% { transform: translate3d(14px, -10px, 0) scale(1.06); opacity: 1; }
+}
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+/* Layered branding-panel motion: slow decor (seconds), quick entrances (ms) */
+.anim-float { animation: float-slow 7s ease-in-out infinite; }
+.anim-drift { animation: drift 9s ease-in-out infinite; animation-delay: var(--d, 0ms); }
+.anim-glow { animation: glow-pulse 6s ease-in-out infinite; }
+.anim-illustration { animation: rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: 150ms; }
+
+.anim-rise { animation: rise 0.35s cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: var(--d, 0ms); }
+.anim-fade { animation: fade-in 0.3s ease both; animation-delay: var(--d, 0ms); }
+.anim-slide { animation: slide-in 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) both; animation-delay: var(--d, 0ms); }
+
+/* Stagger helpers for stat cards / lists */
+.stagger-1 { --d: 60ms; }
+.stagger-2 { --d: 120ms; }
+.stagger-3 { --d: 180ms; }
+.stagger-4 { --d: 240ms; }
+
+/* Consistent control transitions (buttons, rows, cards, badges) */
+.t-control { transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease; }
+.lift-hover:hover { transform: translateY(-2px); }
+
+/* Visible keyboard focus everywhere */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 2px solid #0E7C6B;
+  outline-offset: 2px;
+}
+
+/* Vue Transition for dialogs */
+.dialog-enter-active, .dialog-leave-active { transition: opacity 0.18s ease; }
+.dialog-enter-from, .dialog-leave-to { opacity: 0; }
+.dialog-enter-active .dialog-card, .dialog-leave-active .dialog-card { transition: transform 0.2s ease, opacity 0.2s ease; }
+.dialog-enter-from .dialog-card, .dialog-leave-to .dialog-card { transform: translateY(8px) scale(0.98); opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise, .anim-fade, .anim-slide,
+  .anim-float, .anim-drift, .anim-glow, .anim-illustration { animation: none; }
+  .t-control, .lift-hover:hover { transition: none; transform: none; }
+  .dialog-enter-active, .dialog-leave-active,
+  .dialog-enter-active .dialog-card, .dialog-leave-active .dialog-card { transition: none; }
+}

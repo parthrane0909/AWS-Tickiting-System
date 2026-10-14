@@ -1,0 +1,15 @@
+{
+  "name": "ticketing-backend",
+  "version": "1.0.0",
+  "description": "Local-only ticketing API (Phase 1). Zero production dependencies; designed for future Lambda mapping.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node src/seed.js",
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
