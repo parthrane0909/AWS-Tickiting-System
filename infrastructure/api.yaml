@@ -83,6 +83,7 @@ Resources:
           COMMENTS_TABLE: !Ref CommentsTableName
           ACTIVITIES_TABLE: !Ref ActivitiesTableName
           CORS_ORIGIN: !Ref FrontendOrigin
+          ATTACHMENTS_BUCKET: !Ref TicketingAttachmentsBucket
 
       Policies:
         - Statement:
@@ -110,6 +111,16 @@ Resources:
                 - cognito-idp:ListUsersInGroup
               Resource:
                 - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}'
+
+            - Sid: TicketingS3Attachments
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - !Sub '${TicketingAttachmentsBucket.Arn}/pending/*'
+                - !Sub '${TicketingAttachmentsBucket.Arn}/tickets/*'
 
       Events:
         ProtectedApi:
@@ -149,6 +160,13 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireUnclaimedUploads
+            Status: Enabled
+            Prefix: pending/
+            ExpirationInDays: 1
 
       CorsConfiguration:
         CorsRules:
