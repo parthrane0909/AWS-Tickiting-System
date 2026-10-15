@@ -50,6 +50,7 @@ export const api = {
 devLogin: (email, password) =>
     request("/api/dev-login", { method: "POST", body: { email, password } }).then((r) => r.data),
   devUsers: () => request("/api/dev-users").then((r) => r.data),
+  agents: () => request("/api/agents").then((r) => r.data),
   uploadAttachment: (payload) =>
     request("/api/attachments", { method: "POST", body: payload }).then((r) => r.data),
   listTickets: (params = {}) => {

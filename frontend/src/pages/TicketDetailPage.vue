@@ -61,14 +61,14 @@
           <template v-else-if="auth.isAgent">
             <AppButton variant="light" @click="statusDialog = true">Update status</AppButton>
             <AppButton
-              v-if="!cognitoMode"
               variant="light"
+              :disabled="!!agentDirectoryError"
               @click="assignDialog = true"
             >
               Assign agent
             </AppButton>
-            <span v-else class="text-xs text-muted">
-              Agent assignment will be enabled after Cognito directory integration.
+            <span v-if="agentDirectoryError" class="text-xs text-rose-600">
+              Agent directory unavailable.
             </span>
           </template>
         </div>
@@ -176,6 +176,7 @@ const statusDraft = ref("");
 const assigneeDraft = ref("");
 const saving = ref(false);
 const agentOptions = ref([]);
+const agentDirectoryError = ref("");
 const downloading = ref(false);
 const replaceInput = ref(null);
 
@@ -310,18 +311,24 @@ async function load() {
     assigneeDraft.value = t.assigneeId || "";
     // Local development uses test identities.
     // Cognito agents will use a verified agent directory.
-    if (auth.isAgent && !cognitoMode) {
+    if (auth.isAgent) {
+      agentDirectoryError.value = "";
+
       try {
-        const users = await api.devUsers();
+        const users = cognitoMode
+          ? await api.agents()
+          : await api.devUsers();
+
         agentOptions.value = users
-          .filter((u) => u.role === "agent")
-          .map((u) => ({
+          .filter(u => u.role === "agent")
+          .map(u => ({
             value: u.id,
             label: u.name
           }));
       } catch (error) {
         console.warn("Agent directory unavailable:", error.message);
         agentOptions.value = [];
+        agentDirectoryError.value = error.message;
       }
     }
   } catch (e) {

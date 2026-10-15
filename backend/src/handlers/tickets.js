@@ -6,6 +6,7 @@ import { authenticate } from "../middleware/auth.js";
 import { readJsonBody, sendError, sendJson } from "../middleware/json.js";
 import { createConfiguredRepository } from "../repositories/configuredRepository.js";
 import { createTicketService } from "../services/ticketService.js";
+import { createAgentDirectory } from "../adapters/auth/agentDirectory.js";
 import { badRequest, forbidden } from "../utils/errors.js";
 
 const dataDir = resolveDataDir();
@@ -17,7 +18,8 @@ const repo = createConfiguredRepository({
 const storage = persistenceBackend === "json"
   ? createStorage(dataDir)
   : null;
-const service = createTicketService(repo, storage);
+const agentDirectory = createAgentDirectory();
+const service = createTicketService(repo, storage, agentDirectory);
 
 // Upload bodies carry base64 file bytes; all other JSON bodies stay small.
 const UPLOAD_BODY_LIMIT = 8 * 1024 * 1024;
@@ -92,7 +94,11 @@ export async function handleRequest(req, res) {
   }
 
   // All ticket routes require dev auth.
-  if (!path.startsWith("/api/tickets") && path !== "/api/attachments") {
+  if (
+    !path.startsWith("/api/tickets") &&
+    path !== "/api/attachments" &&
+    path !== "/api/agents"
+  ) {
     return sendJson(res, 404, { error: { message: "Not found." } });
   }
 
@@ -104,6 +110,17 @@ export async function handleRequest(req, res) {
   }
 
   try {
+    // Only authenticated Agents may access the Agent directory.
+    if (method === "GET" && path === "/api/agents") {
+      if (user.role !== "agent") {
+        throw forbidden("Only agents can view the agent directory.");
+      }
+
+      return sendJson(res, 200, {
+        data: await agentDirectory.list()
+      });
+    }
+
     // POST /api/attachments — genuine local upload (customers only).
     // Replaces the former presigned-url stub, which returned a fake URL.
     if (method === "POST" && path === "/api/attachments") {

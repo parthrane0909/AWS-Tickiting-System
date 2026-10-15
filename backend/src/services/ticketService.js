@@ -1,12 +1,16 @@
 import { badRequest, forbidden, notFound } from "../utils/errors.js";
 import { newId, newTicketId, nowIso } from "../utils/ids.js";
 import { validateComment, validateCreateTicket, validateUpdateTicket } from "../validation/tickets.js";
-import { findDevUser } from "../adapters/auth/devUsers.js";
+import { createAgentDirectory } from "../adapters/auth/agentDirectory.js";
 
 // Business rules + RBAC live here. Handlers stay thin; repositories stay dumb.
 // `storage` (local attachment adapter) is injected; attachment references are
 // only accepted after the bytes were actually stored (claim step).
-export function createTicketService(repo, storage = null) {
+export function createTicketService(
+  repo,
+  storage = null,
+  agentDirectory = createAgentDirectory()
+) {
   function assertCanRead(ticket, user) {
     if (user.role === "agent") return;
     if (ticket.customerId !== user.id) throw forbidden("You can only access your own tickets.");
@@ -125,7 +129,7 @@ export function createTicketService(repo, storage = null) {
             updates.assigneeId = null;
             updates.assigneeName = null;
           } else {
-            const assignee = findDevUser(patch.assigneeId);
+            const assignee = await agentDirectory.find(patch.assigneeId);
             if (!assignee || assignee.role !== "agent") throw forbidden("Assignee must be a known agent.");
             updates.assigneeId = assignee.id;
             updates.assigneeName = assignee.name;
