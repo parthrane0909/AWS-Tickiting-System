@@ -47,7 +47,7 @@ npm run dev:frontend
 
 Use the Cognito Hosted UI, not the local dev-login form. `http://localhost:5173/auth/callback` is registered in the Cognito app client. The frontend remains on localhost for this POC: **there is no publicly hosted Vue site**. A running Vite server and internet connection are needed to demonstrate it. Do not include real passwords, tokens, signed URLs, or AWS credentials in the repository or screenshots.
 
-The Cognito stack can auto-assign **newly confirmed self-signups** to the `Customer` group once the optional onboarding infrastructure update described in `FINAL_SUBMISSION.md` has been deployed. Existing users without a group require a one-time group assignment; Agent creation and assignment remain admin-controlled.
+The deployed Cognito post-confirmation Lambda automatically assigns newly confirmed self-signups to the `Customer` group. This workflow has been verified on AWS. Existing users without a group require a one-time group assignment; Agent creation and assignment remain admin-controlled.
 
 ## AWS infrastructure currently used
 
@@ -86,7 +86,7 @@ Local mode additionally supports `POST /api/attachments` for base64-file upload 
 bash scripts/final-check.sh
 ```
 
-That runs the backend tests (including S3 validation), Cognito trigger unit checks and the frontend production build, and validates the SAM template if SAM is installed. Tests using S3 mocks are **not** a replacement for cloud deployment verification. Refer to `FINAL_SUBMISSION.md` for the single-pass live acceptance and Cognito deployment steps.
+That runs the backend tests (including S3 validation), Cognito trigger unit checks and the frontend production build, and validates the SAM template if SAM is installed. Tests using S3 mocks are **not** a replacement for cloud deployment verification. The live AWS Customer workflow, Agent workflow and new Customer sign-up have been verified.
 
 ## Limitations / security notes
 
