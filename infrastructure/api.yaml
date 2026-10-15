@@ -1,0 +1,136 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TickDesk serverless backend with Cognito and DynamoDB
+
+Parameters:
+  TicketsTableName:
+    Type: String
+  CommentsTableName:
+    Type: String
+  ActivitiesTableName:
+    Type: String
+  CognitoUserPoolId:
+    Type: String
+  CognitoClientId:
+    Type: String
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:5173
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - x86_64
+    MemorySize: 256
+    Timeout: 15
+
+Resources:
+  TicketingHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+
+      DefinitionBody:
+        openapi: '3.0.1'
+        info:
+          title: TickDesk API
+          version: '1.0'
+        paths: {}
+
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref FrontendOrigin
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: '$request.header.Authorization'
+            AuthorizationScopes:
+              - openid
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}'
+              audience:
+                - !Ref CognitoClientId
+
+  TicketingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: TickDesk authenticated backend
+      CodeUri: ../.lambda-source/
+      Handler: src/lambda.handler
+      ReservedConcurrentExecutions: 2
+
+      Environment:
+        Variables:
+          AUTH_MODE: cognito
+          PERSISTENCE_BACKEND: dynamodb
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          TICKETS_TABLE: !Ref TicketsTableName
+          COMMENTS_TABLE: !Ref CommentsTableName
+          ACTIVITIES_TABLE: !Ref ActivitiesTableName
+          CORS_ORIGIN: !Ref FrontendOrigin
+
+      Policies:
+        - Statement:
+            - Sid: TicketingDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:DescribeTable
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TicketsTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CommentsTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ActivitiesTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TicketsTableName}/index/*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CommentsTableName}/index/*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ActivitiesTableName}/index/*'
+
+            - Sid: CognitoAgentLookup
+              Effect: Allow
+              Action:
+                - cognito-idp:ListUsersInGroup
+              Resource:
+                - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}'
+
+      Events:
+        ProtectedApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TicketingHttpApi
+            Path: /api/{proxy+}
+            Method: ANY
+            PayloadFormatVersion: '2.0'
+
+  TicketingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${TicketingFunction}'
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Description: TickDesk HTTPS API endpoint
+    Value: !Sub 'https://${TicketingHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  LambdaFunctionName:
+    Value: !Ref TicketingFunction
+
+  HttpApiId:
+    Value: !Ref TicketingHttpApi
