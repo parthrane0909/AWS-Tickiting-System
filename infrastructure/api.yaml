@@ -31,6 +31,9 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: '$default'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 3
 
       DefinitionBody:
         openapi: '3.0.1'
@@ -69,7 +72,6 @@ Resources:
       Description: TickDesk authenticated backend
       CodeUri: ../.lambda-source/
       Handler: src/lambda.handler
-      ReservedConcurrentExecutions: 2
 
       Environment:
         Variables:
