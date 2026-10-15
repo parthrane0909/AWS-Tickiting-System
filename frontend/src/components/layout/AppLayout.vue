@@ -44,6 +44,7 @@
   </div>
 </template>
 <script setup>
+import { beginCognitoLogout } from "../../services/cognitoOAuth.js";
 import { useRoute, useRouter } from "vue-router";
 import AnimatedBackground from "./AnimatedBackground.vue";
 import { useAuthStore } from "../../stores/auth.js";
@@ -60,6 +61,12 @@ function navClass(path) {
 }
 function logout() {
   auth.signOut();
+
+  if (import.meta.env.VITE_AUTH_MODE === "cognito") {
+    beginCognitoLogout();
+    return;
+  }
+
   router.push("/login");
 }
 </script>

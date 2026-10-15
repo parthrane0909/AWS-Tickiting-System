@@ -47,6 +47,26 @@ export async function handleRequest(req, res) {
   const path = url.pathname;
   const method = req.method.toUpperCase();
 
+  const authMode = process.env.AUTH_MODE || "dev";
+
+  if (
+    authMode !== "dev" &&
+    (path === "/api/dev-users" || path === "/api/dev-login")
+  ) {
+    return sendJson(res, 404, {
+      error: { message: "Not found." }
+    });
+  }
+
+  if (method === "GET" && path === "/api/me") {
+    try {
+      const user = await authenticate(req);
+      return sendJson(res, 200, { data: user });
+    } catch (err) {
+      return sendError(res, err);
+    }
+  }
+
   // Public (dev-only): health + dev identity listing for the login screen.
   if (method === "GET" && path === "/api/health") return sendJson(res, 200, { data: { ok: true } });
   if (method === "GET" && path === "/api/dev-users") {
@@ -78,7 +98,7 @@ export async function handleRequest(req, res) {
 
   let user;
   try {
-    user = authenticate(req);
+    user = await authenticate(req);
   } catch (err) {
     return sendError(res, err);
   }

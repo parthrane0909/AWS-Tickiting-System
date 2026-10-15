@@ -6,6 +6,18 @@ const routes = [
   { path: "/", name: "dashboard", component: () => import("../pages/DashboardPage.vue") },
   { path: "/tickets/new", name: "create", component: () => import("../pages/CreateTicketPage.vue") },
   { path: "/tickets/:id", name: "detail", component: () => import("../pages/TicketDetailPage.vue"), props: true },
+  {
+    path: "/auth/cognito-test",
+    name: "cognito-test",
+    component: () => import("../pages/CognitoTestPage.vue"),
+    meta: { public: true }
+  },
+  {
+    path: "/auth/callback",
+    name: "cognito-callback",
+    component: () => import("../pages/CognitoCallbackPage.vue"),
+    meta: { public: true }
+  },
   { path: "/:pathMatch(.*)*", name: "notfound", component: () => import("../pages/NotFoundPage.vue"), meta: { public: true } },
 ];
 

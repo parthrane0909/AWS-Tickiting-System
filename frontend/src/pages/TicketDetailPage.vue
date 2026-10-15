@@ -60,7 +60,16 @@
           </template>
           <template v-else-if="auth.isAgent">
             <AppButton variant="light" @click="statusDialog = true">Update status</AppButton>
-            <AppButton variant="light" @click="assignDialog = true">Assign agent</AppButton>
+            <AppButton
+              v-if="!cognitoMode"
+              variant="light"
+              @click="assignDialog = true"
+            >
+              Assign agent
+            </AppButton>
+            <span v-else class="text-xs text-muted">
+              Agent assignment will be enabled after Cognito directory integration.
+            </span>
           </template>
         </div>
 
@@ -148,6 +157,8 @@ const props = defineProps({ id: String });
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const cognitoMode =
+  import.meta.env.VITE_AUTH_MODE === "cognito";
 const { push } = useToast();
 const ticketId = props.id || route.params.id;
 
@@ -297,9 +308,21 @@ async function load() {
     activity.value = h;
     statusDraft.value = t.status;
     assigneeDraft.value = t.assigneeId || "";
-    if (auth.isAgent) {
-      const users = await api.devUsers();
-      agentOptions.value = users.filter((u) => u.role === "agent").map((u) => ({ value: u.id, label: u.name }));
+    // Local development uses test identities.
+    // Cognito agents will use a verified agent directory.
+    if (auth.isAgent && !cognitoMode) {
+      try {
+        const users = await api.devUsers();
+        agentOptions.value = users
+          .filter((u) => u.role === "agent")
+          .map((u) => ({
+            value: u.id,
+            label: u.name
+          }));
+      } catch (error) {
+        console.warn("Agent directory unavailable:", error.message);
+        agentOptions.value = [];
+      }
     }
   } catch (e) {
     loadError.value = e.status === 404 ? "Ticket not found." : e.message;

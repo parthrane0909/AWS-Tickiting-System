@@ -1,9 +1,23 @@
 // Single HTTP service layer. All backend calls go through here.
+import {
+  getCognitoSession,
+  clearCognitoSession
+} from "./cognitoOAuth.js";
+
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 function userHeaders() {
+  if (import.meta.env.VITE_AUTH_MODE === "cognito") {
+    const session = getCognitoSession();
+
+    return session
+      ? { Authorization: `Bearer ${session.accessToken}` }
+      : {};
+  }
+
   const raw = localStorage.getItem("tickdesk-dev-user");
   const user = raw ? JSON.parse(raw) : null;
+
   return user?.id ? { "x-dev-user-id": user.id } : {};
 }
 
@@ -15,6 +29,14 @@ async function request(path, { method = "GET", body } = {}) {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
+        if (
+      import.meta.env.VITE_AUTH_MODE === "cognito" &&
+      res.status === 401 &&
+      path !== "/api/me"
+    ) {
+      clearCognitoSession();
+      window.location.replace("/login?reason=session-expired");
+    }
     const err = new Error(json?.error?.message || `Request failed (${res.status}).`);
     err.status = res.status;
     err.details = json?.error?.details;
@@ -24,7 +46,8 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
-  devLogin: (email, password) =>
+  me: () => request("/api/me").then((r) => r.data),
+devLogin: (email, password) =>
     request("/api/dev-login", { method: "POST", body: { email, password } }).then((r) => r.data),
   devUsers: () => request("/api/dev-users").then((r) => r.data),
   uploadAttachment: (payload) =>
