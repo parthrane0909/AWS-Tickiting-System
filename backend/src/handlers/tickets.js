@@ -2,6 +2,7 @@ import { CATEGORIES, PRIORITIES, STATUSES } from "../constants.js";
 import { DEV_USERS, verifyDevCredentials } from "../adapters/auth/devUsers.js";
 import { resolveDataDir } from "../adapters/persistence/jsonStore.js";
 import { createStorage } from "../adapters/storage/localAttachments.js";
+import { createS3Storage } from "../adapters/storage/s3Attachments.js";
 import { authenticate } from "../middleware/auth.js";
 import { readJsonBody, sendError, sendJson } from "../middleware/json.js";
 import { createConfiguredRepository } from "../repositories/configuredRepository.js";
@@ -17,7 +18,9 @@ const repo = createConfiguredRepository({
 });
 const storage = persistenceBackend === "json"
   ? createStorage(dataDir)
-  : null;
+  : persistenceBackend === "dynamodb" && process.env.ATTACHMENTS_BUCKET
+    ? createS3Storage()
+    : null;
 const agentDirectory = createAgentDirectory();
 const service = createTicketService(repo, storage, agentDirectory);
 
@@ -97,6 +100,7 @@ export async function handleRequest(req, res) {
   if (
     !path.startsWith("/api/tickets") &&
     path !== "/api/attachments" &&
+    path !== "/api/attachments/presign" &&
     path !== "/api/agents"
   ) {
     return sendJson(res, 404, { error: { message: "Not found." } });
@@ -121,11 +125,30 @@ export async function handleRequest(req, res) {
       });
     }
 
+    // POST /api/attachments/presign — direct S3 upload authorization.
+    if (method === "POST" && path === "/api/attachments/presign") {
+      if (user.role !== "customer") {
+        throw forbidden("Only customers can upload attachments.");
+      }
+
+      if (!storage?.createUpload) {
+        return sendJson(res, 501, {
+          error: { message: "S3 attachment uploads are not configured." }
+        });
+      }
+
+      const body = await readJsonBody(req);
+
+      return sendJson(res, 200, {
+        data: await storage.createUpload(body, user.id)
+      });
+    }
+
     // POST /api/attachments — genuine local upload (customers only).
     // Replaces the former presigned-url stub, which returned a fake URL.
     if (method === "POST" && path === "/api/attachments") {
       if (user.role !== "customer") throw forbidden("Only customers can upload attachments.");
-      if (!storage) {
+      if (!storage?.store) {
         return sendJson(res, 501, {
           error: { message: "Attachments require S3 in DynamoDB mode." }
         });
@@ -156,6 +179,13 @@ export async function handleRequest(req, res) {
       }
       if (method === "GET" && sub === "attachment") {
         const file = await service.downloadAttachment(ticketId, user);
+
+        // S3: return a short-lived URL after authorization.
+        // Local storage: preserve the existing binary response.
+        if (file.url) {
+          return sendJson(res, 200, { data: file });
+        }
+
         res.writeHead(200, {
           "content-type": file.mimeType,
           "content-length": file.bytes.length,

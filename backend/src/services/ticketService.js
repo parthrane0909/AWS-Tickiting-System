@@ -20,6 +20,18 @@ export function createTicketService(
     if (!storage) throw badRequest("Attachments are not supported by this service instance.");
   }
 
+  async function cleanupUncommittedAttachment(attachment) {
+    if (!attachment) return;
+
+    try {
+      await storage.release(attachment.fileKey);
+    } catch (error) {
+      // Preserve the original persistence error.
+      // Failed cleanup needs monitoring and later reconciliation.
+      console.error("Attachment rollback cleanup failed:", error);
+    }
+  }
+
   async function toList({ search, status, priority, category, page, limit }, user) {
     // Use the customer index in DynamoDB; still check ownership below.
     let items = await repo.listTickets(user.role === "customer" ? user.id : null);
@@ -63,7 +75,7 @@ export function createTicketService(
       let attachment = null;
       if (input.attachment) {
         assertStorage();
-        attachment = await storage.claim(input.attachment.fileKey, ticketId);
+        attachment = await storage.claim(input.attachment.fileKey, ticketId, user.id);
       }
       const ticket = {
         id: ticketId,
@@ -77,7 +89,13 @@ export function createTicketService(
         createdAt: ts,
         updatedAt: ts,
       };
-      await repo.insertTicket(ticket);
+      try {
+        await repo.insertTicket(ticket);
+      } catch (error) {
+        await cleanupUncommittedAttachment(attachment);
+        throw error;
+      }
+
       await repo.insertActivity({
         id: newId("act"), ticketId: ticket.id, actorId: user.id, actorName: user.name,
         type: "created", detail: "Ticket created.", createdAt: ts,
@@ -102,6 +120,7 @@ export function createTicketService(
       const updates = {};
       const changed = [];
       let previousAttachmentToRelease = null;
+      let newAttachmentToRelease = null;
       if (user.role === "customer") {
         for (const field of ["title", "description", "priority", "category"]) {
           if (patch[field] !== undefined && patch[field] !== ticket[field]) {
@@ -114,9 +133,10 @@ export function createTicketService(
           const nextKey = patch.attachment ? patch.attachment.fileKey : null;
           const prevKey = ticket.attachment ? ticket.attachment.fileKey : null;
           if (nextKey !== prevKey) {
-            const claimed = nextKey ? await storage.claim(nextKey, ticketId) : null;
+            const claimed = nextKey ? await storage.claim(nextKey, ticketId, user.id) : null;
             // Release the previous file only AFTER the ticket update succeeds.
             // A persistence failure must not delete the attachment still referenced by the ticket.
+            if (claimed) newAttachmentToRelease = claimed;
             if (prevKey) previousAttachmentToRelease = prevKey;
             updates.attachment = claimed;
             changed.push(nextKey ? "attachment added" : "attachment removed");
@@ -137,8 +157,19 @@ export function createTicketService(
         }
       }
       updates.updatedAt = nowIso();
-      const saved = await repo.updateTicket(ticketId, updates);
-      if (!saved) throw notFound("Ticket not found.");
+      let saved;
+
+      try {
+        saved = await repo.updateTicket(ticketId, updates);
+      } catch (error) {
+        await cleanupUncommittedAttachment(newAttachmentToRelease);
+        throw error;
+      }
+
+      if (!saved) {
+        await cleanupUncommittedAttachment(newAttachmentToRelease);
+        throw notFound("Ticket not found.");
+      }
       if (previousAttachmentToRelease) await storage.release(previousAttachmentToRelease);
       const ts = updates.updatedAt;
       if (changed.length) {
@@ -169,6 +200,14 @@ export function createTicketService(
       assertCanRead(ticket, user);
       if (!ticket.attachment) throw notFound("This ticket has no attachment.");
       assertStorage();
+
+      if (typeof storage.downloadUrl === "function") {
+        return await storage.downloadUrl(
+          ticket.attachment.fileKey,
+          ticket.attachment.fileName
+        );
+      }
+
       const file = await storage.read(ticket.attachment.fileKey);
       if (!file) throw notFound("Attachment file is missing from local storage.");
       return file;
