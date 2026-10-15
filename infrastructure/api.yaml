@@ -120,6 +120,16 @@ Resources:
             Method: ANY
             PayloadFormatVersion: '2.0'
 
+        CorsPreflight:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TicketingHttpApi
+            Path: /api/{proxy+}
+            Method: OPTIONS
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: NONE
+
   TicketingLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
