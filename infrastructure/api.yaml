@@ -1,0 +1,209 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TickDesk serverless backend with Cognito and DynamoDB
+
+Parameters:
+  TicketsTableName:
+    Type: String
+  CommentsTableName:
+    Type: String
+  ActivitiesTableName:
+    Type: String
+  CognitoUserPoolId:
+    Type: String
+  CognitoClientId:
+    Type: String
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:5173
+  PublicFrontendOrigin:
+    Type: String
+    Default: https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures:
+      - x86_64
+    MemorySize: 256
+    Timeout: 15
+
+Resources:
+  TicketingHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 3
+
+      DefinitionBody:
+        openapi: '3.0.1'
+        info:
+          title: TickDesk API
+          version: '1.0'
+        paths: {}
+
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref FrontendOrigin
+          - !Ref PublicFrontendOrigin
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - OPTIONS
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: '$request.header.Authorization'
+            AuthorizationScopes:
+              - openid
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}'
+              audience:
+                - !Ref CognitoClientId
+
+  TicketingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: TickDesk authenticated backend
+      CodeUri: ../.lambda-source/
+      Handler: src/lambda.handler
+
+      Environment:
+        Variables:
+          AUTH_MODE: cognito
+          PERSISTENCE_BACKEND: dynamodb
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          TICKETS_TABLE: !Ref TicketsTableName
+          COMMENTS_TABLE: !Ref CommentsTableName
+          ACTIVITIES_TABLE: !Ref ActivitiesTableName
+          CORS_ORIGIN: !Join [",", [!Ref FrontendOrigin, !Ref PublicFrontendOrigin]]
+          ATTACHMENTS_BUCKET: !Ref TicketingAttachmentsBucket
+
+      Policies:
+        - Statement:
+            - Sid: TicketingDynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:DescribeTable
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TicketsTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CommentsTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ActivitiesTableName}'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TicketsTableName}/index/*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CommentsTableName}/index/*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ActivitiesTableName}/index/*'
+
+            - Sid: CognitoAgentLookup
+              Effect: Allow
+              Action:
+                - cognito-idp:ListUsersInGroup
+              Resource:
+                - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}'
+
+            - Sid: TicketingS3Attachments
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - !Sub '${TicketingAttachmentsBucket.Arn}/pending/*'
+                - !Sub '${TicketingAttachmentsBucket.Arn}/tickets/*'
+
+      Events:
+        ProtectedApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TicketingHttpApi
+            Path: /api/{proxy+}
+            Method: ANY
+            PayloadFormatVersion: '2.0'
+
+        CorsPreflight:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TicketingHttpApi
+            Path: /api/{proxy+}
+            Method: OPTIONS
+            PayloadFormatVersion: '2.0'
+            Auth:
+              Authorizer: NONE
+
+  TicketingAttachmentsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireUnclaimedUploads
+            Status: Enabled
+            Prefix: pending/
+            ExpirationInDays: 1
+
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - !Ref FrontendOrigin
+              - !Ref PublicFrontendOrigin
+            AllowedMethods:
+              - POST
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - '*'
+            ExposedHeaders:
+              - ETag
+            MaxAge: 300
+
+  TicketingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${TicketingFunction}'
+      RetentionInDays: 7
+
+Outputs:
+  AttachmentsBucketName:
+    Description: Private S3 bucket for ticket attachments
+    Value: !Ref TicketingAttachmentsBucket
+
+  ApiUrl:
+    Description: TickDesk HTTPS API endpoint
+    Value: !Sub 'https://${TicketingHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  LambdaFunctionName:
+    Value: !Ref TicketingFunction
+
+  HttpApiId:
+    Value: !Ref TicketingHttpApi

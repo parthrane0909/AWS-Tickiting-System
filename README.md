@@ -1,183 +1,166 @@
-# TickDesk — AWS Serverless Ticketing System (Phase 1: Local Application)
+# TickDesk — AWS Serverless Ticketing System POC
 
-Minimal but fully functional ticketing system with **Customer** and **Agent** roles.
-Phase 1 runs **entirely locally** — no AWS credentials required, no AWS services contacted.
+TickDesk is a Vue 3 ticketing proof of concept backed by AWS API Gateway, Lambda, DynamoDB, Cognito and a private S3 bucket. This repository also supports a separate local JSON/dev-auth mode for development.
 
-> **Dev-auth notice:** sign-in is an email/password form backed by a local development
-> credential check (`POST /api/dev-login`). It is **not** Amazon Cognito and provides no
-> real security — Cognito Hosted UI replaces it in Phase 2.
-> **Test credentials (dev-only):** any of `alice@example.com`, `bob@example.com`
-> (customers), `eve@example.com` (agent) with password `local-dev-pass`
-> (or `TICKDESK_DEV_PASSWORD`). A labeled "Local development access" panel on the
-> login page lists them.
-> **Attachment notice:** `POST /tickets/presigned-url` is a local stub that reserves a
-> `fileKey` and validates metadata. It does **not** generate a real S3 presigned URL.
+## Assignment feature coverage
 
-## Prerequisites
+| Requirement | Implementation |
+|---|---|
+| Cognito Hosted UI sign-up/sign-in | OAuth authorization code + PKCE; Cognito user pool and Customer/Agent groups |
+| Customer/Agent authorization | API Gateway JWT authorizer plus backend group and ticket-ownership checks |
+| Ticket screens | Login, list/search/filter, create, ticket detail, activity, comments |
+| Ticket workflow | Customer creates/edits own OPEN tickets; Agent changes status and assignee |
+| DynamoDB | Separate tickets, comments and activity tables |
+| Attachments | Private S3, presigned POST (120 s, 5 MiB maximum), verified ownership, signed GET (60 s) |
+| API | `/api/tickets`, `/api/tickets/:id`, `/api/tickets/:id/comments`, `/api/tickets/:id/history`, `/api/attachments/presign` (and `/api/tickets/presigned-url` alias) |
 
-- Node.js 20 (`node --version` → v20.x), npm 10+
+The original brief's routes omit the `/api` prefix. The application uses `/api` consistently. Runtime Node.js **22** is used in place of the brief's Node.js 20.
 
-## Installation
+## Install and run locally (no AWS)
+
+Requires Node.js 22 (see `.nvmrc`), npm and two terminals.
 
 ```bash
 npm run install:all
-# or individually:
-npm --prefix backend install    # (no production deps — zero-dependency API)
-npm --prefix frontend install
+AUTH_MODE=dev PERSISTENCE_BACKEND=json npm run dev:backend
+# In a second terminal:
+npm run dev:frontend
 ```
 
-## Environment configuration
+Open http://localhost:5173. The local development sign-in uses `alice@example.com`, `bob@example.com` (Customer) and `eve@example.com` (Agent); the local-only development password is `local-dev-pass`. This mode is **not secure authentication**; do not expose it to the Internet.
+
+## Connect the Vue frontend to the deployed AWS backend
+
+Create `frontend/.env.local` (do not commit this file):
+
+```dotenv
+VITE_AUTH_MODE=cognito
+VITE_API_BASE_URL=https://s4q5cb0tf7.execute-api.ap-south-1.amazonaws.com
+VITE_COGNITO_CLIENT_ID=71g9osi7smmo11e03mdvnq9sln
+VITE_COGNITO_ISSUER=https://cognito-idp.ap-south-1.amazonaws.com/ap-south-1_xONIeDCsK
+VITE_COGNITO_DOMAIN=https://tickdesk-685394474319-ap-south-1.auth.ap-south-1.amazoncognito.com
+```
 
 ```bash
-cp backend/.env.example backend/.env          # PORT=3001, DATA_DIR= (default ./data)
-cp frontend/.env.example frontend/.env        # VITE_API_BASE_URL= (empty = Vite proxy to :3001)
+npm run dev:frontend
 ```
 
-## Local startup
+Use the Cognito Hosted UI, not the local dev-login form. `http://localhost:5173/auth/callback` is registered in the Cognito app client. The Vue frontend is deployed publicly on AWS using a Lambda Function URL. Users can access TickDesk without running a local server. Local Vite remains available for development. Do not include real passwords, tokens, signed URLs, or AWS credentials in the repository or screenshots.
 
-Terminal 1 — backend (seeds `[DEMO]` tickets on first run):
+The deployed Cognito post-confirmation Lambda automatically assigns newly confirmed self-signups to the `Customer` group. This workflow has been verified on AWS. Existing users without a group require a one-time group assignment; Agent creation and assignment remain admin-controlled.
 
-```bash
-npm run dev:backend   # http://localhost:3001
-```
+## AWS infrastructure currently used
 
-Terminal 2 — frontend:
+- Region: `ap-south-1`; named CLI profile: `tickdesk-builder`.
+- `tickdesk-poc-auth`: Cognito user pool, Hosted UI client, Customer/Agent groups.
+- `tickdesk-poc-data`: DynamoDB ticket, comment and activity tables.
+- `tickdesk-poc-api`: HTTP API with JWT authorization, Node.js 22 Lambda, scoped DynamoDB/S3 permissions and private S3 attachment bucket.
+- API base: `https://s4q5cb0tf7.execute-api.ap-south-1.amazonaws.com`.
+- S3 bucket: `tickdesk-poc-api-ticketingattachmentsbucket-c8v5bhh4xolm`. Public access blocked, SSE-S3 enabled; temporary `pending/` objects expire after 1 day. Ticket attachments live under `tickets/`.
 
-```bash
-npm run dev:frontend  # http://localhost:5173
-```
+Infrastructure templates: `infrastructure/template.yaml` (data), `infrastructure/cognito.yaml` (auth), `infrastructure/api.yaml` (API+S3).
 
-Sign in with a dev email + dev password (see notice above). Alice/Bob are customers, Eve is an agent.
+## Key endpoints
 
-## Role permission matrix (enforced by the backend service layer)
+All `/api/tickets*`, `/api/attachments*`, and `/api/agents` routes require authentication. In AWS mode, API Gateway validates the JWT and the Lambda service re-verifies Cognito access tokens and groups.
 
-| Operation | Customer | Agent |
+| Method | Path | Action |
 |---|---|---|
-| View own tickets | ✅ | ✅ |
-| View other customers' tickets | ❌ (403) | ✅ |
-| Create a ticket | ✅ | ❌ (403) |
-| Edit own ticket details (title/description/priority/category) | ✅ while OPEN | ❌ (403) |
-| Edit another customer's ticket | ❌ (403) | ❌ (403) |
-| Update ticket status | ❌ (403) | ✅ |
-| Assign/reassign agent | ❌ (403) | ✅ |
-| Add/view comments | ✅ | ✅ |
-| Upload attachments | ✅ | ❌ (403) |
-| Add/replace/remove attachment on own OPEN ticket | ✅ | ❌ (403) |
-| Download attachment | own tickets only | any ticket |
+| GET | `/api/me` | Current verified user |
+| GET | `/api/tickets` | Scoped list with search/status/priority/category and pagination |
+| POST | `/api/tickets` | Create ticket (Customer) |
+| GET | `/api/tickets/:id` | Read ticket (owner or Agent) |
+| PUT | `/api/tickets/:id` | Edit own OPEN ticket or Agent workflow |
+| GET/POST | `/api/tickets/:id/comments` | Read/add comments |
+| GET | `/api/tickets/:id/history` | Activity timeline |
+| GET | `/api/agents` | Verified Agent directory |
+| POST | `/api/attachments/presign` | S3 presigned POST (Customer only) |
+| POST | `/api/tickets/presigned-url` | Compatibility alias for assignment's presigned URL route |
+| GET | `/api/tickets/:id/attachment` | Local bytes or authorized temporary S3 URL |
 
-The frontend hides/disables prohibited actions (router guard, nav, buttons),
-but the backend is authoritative: crafted requests are rejected with 403/400
-regardless of what the browser sends. Identity comes from the trusted
-`x-dev-user-id` header, never from body fields like `userId` or `status`.
+Local mode additionally supports `POST /api/attachments` for base64-file upload and development-only login endpoints.
 
-## Routes & features
-
-| Route | Who | What |
-|---|---|---|
-| `/login` | public | Two-panel sign-in (email/password form with explicit Sign In button + animated branding panel). No role picker in the normal flow; a collapsed dev-only disclosure lists test identities (Fill populates, never auto-submits) |
-| `/` | authed | Dashboard: live stat cards, search, status/priority filters, ticket table |
-| `/tickets/new` | authed | Create ticket (validation, optional attachment metadata) |
-| `/tickets/:id` | owner or agent | Detail, comments, activity timeline, agent status/assign dialogs |
-| `*` | public | 404 page |
-
-Customers see only their own tickets; agents see all. All rules are enforced in the backend
-service layer (`backend/src/services/ticketService.js`), never just in the UI.
-
-## API endpoints (base `http://localhost:3001`)
-
-Auth header for all `/tickets*`: `x-dev-user-id: <cust_alice|cust_bob|agent_eve>` (local trust boundary).
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| POST | `/api/tickets` | Create ticket (customers only) |
-| GET | `/api/tickets?search=&status=&priority=&category=&page=&limit=` | List / filter / search (customers auto-scoped) |
-| GET | `/api/tickets/:ticketId` | Ticket detail |
-| PUT | `/api/tickets/:ticketId` | Update — customers: own OPEN-ticket fields + attachment; agents: status/assignee |
-| POST | `/api/tickets/:ticketId/comments` | Add comment |
-| GET | `/api/tickets/:ticketId/comments` | List comments |
-| GET | `/api/tickets/:ticketId/history` | Activity timeline (supplement to the 7-contract set) |
-| POST | `/api/attachments` | **Real local upload** — JSON body `{fileName, mimeType, size, contentBase64}`; stores bytes on disk, returns `{attachmentId, fileName, mimeType, size, fileKey, uploadedAt}` (customers only) |
-| GET | `/api/tickets/:ticketId/attachment` | Download attachment bytes (authorized users only) |
-| POST | `/api/dev-login` | **Dev-only, additive** — verifies dev email + `TICKDESK_DEV_PASSWORD`, returns identity |
-| GET | `/api/dev-users` | Dev identities (feeds the login disclosure + agent assign list; deleted in Phase 2) |
-| GET | `/api/health` | Health check |
-
-> **Attachment note (Phase 1):** uploads are genuine — bytes are written to
-> `backend/data/uploads/` with server-generated names, metadata to
-> `backend/data/uploads.json`, and the ticket references the `fileKey`.
-> The former `POST /api/tickets/presigned-url` stub (which returned a fake
-> URL) was **removed** and replaced by the real upload endpoint above.
-> Files are transmitted as base64 inside the JSON body (dev PoC only,
-> 5 MB `MAX_UPLOAD_BYTES` cap); Phase 2 replaces this with S3 presigned URLs
-> and direct browser-to-S3 upload.
-
-Success: `{ data, meta? }` · Errors: `{ error: { message, details? } }` with 200/201/400/401/403/404.
-
-## Test commands & results (2026-10-12)
+## Tests and final acceptance
 
 ```bash
-npm run test:backend  # node --test → 28/28 pass (tickets, roles/RBAC, attachments incl. HTTP round-trip + restart persistence, dev-login)
-npm run build         # vite build → success
+bash scripts/final-check.sh
 ```
 
-Manual integration run (curl against fresh server, all green):
-agent create → **403**; customer create → 201; customer upload → 201 with
-server-generated `fileKey`; attach via PUT → metadata on ticket; download as
-agent → raw bytes + `content-disposition`; download as other customer → **403**;
-customer edit own → 200 with `edited` activity; customer smuggles `status` →
-**403**; agent edits title → **403**; agent status+assignee → 200; customer
-edit after status change (not OPEN) → **403**; cross-customer access → **403**;
-unknown `fileKey` on create → **400** with no ticket persisted; attachment
-remove → bytes deleted from disk; download after "restart" (fresh service
-instance, same data dir) → identical bytes. Frontend `vite dev` serves
-`/login`, `/`, `/tickets/new`, `/tickets/:id` HTTP 200.
+That runs the backend tests (including S3 validation), Cognito trigger unit checks and the frontend production build, and validates the SAM template if SAM is installed. Tests using S3 mocks are **not** a replacement for cloud deployment verification. The live AWS Customer workflow, Agent workflow and new Customer sign-up have been verified.
 
-**Attachment download fix (2026-10-12):** the backend was verified healthy
-(HTTP 200, exact bytes, MD5 identical to disk). The defect was in
-`frontend/src/services/api.js`: `downloadAttachment` called `res.json()`
-*before* the `res.ok` check, which consumed the binary response body stream
-and made the following `res.blob()` throw `TypeError: Body has already been
-read`. Fix: parse JSON only on the error path. Also fixed the object-URL
-revocation timing in `TicketDetailPage.vue` (revoke after 1s, not
-synchronously after click) and added a duplicate-click guard.
+## Limitations / security notes
 
-## Design system (final refinement)
+- The frontend is hosted through an AWS Lambda Function URL. CloudFront deployment was blocked by AWS account-verification restrictions.
+- A Cognito group must be present in the access token; no-group and dual-group users are rejected. The post-confirmation trigger only handles *future* newly confirmed self-registrations after deployment.
+- File uploads are limited to one per ticket, restricted to PNG/JPEG/PDF/TXT and 5 MiB. MIME type is checked, but file contents are not malware-scanned; S3 objects are private and signed links expire.
+- Orphaned pending files are subject to a 1-day lifecycle rule; S3 cleanup is asynchronous. Rare database/S3 partial failures may need manual reconciliation.
+- IAM for the `tickdesk-builder` development profile has broad administrative permissions; narrow these for a production rollout. The Cognito onboarding trigger IAM scope is restricted to user pools in the AWS account/region because a per-pool reference would produce a CloudFormation dependency cycle.
+- The $5 AWS Budget is a **notification, not a hard spending cap**. Delete unneeded retained S3 objects and other test resources when finished.
+- No SLA, HA, concurrency guarantee, malware scanning, large-file multipart support, or production-grade account recovery is claimed for this POC.
 
-- Warm ivory page `#F5F3EE`; white primary cards; lavender `#F0EAF8`, blue `#EAF2FC`,
-  mint `#E7F4EC`, blush `#F8E8F1`, cream `#FBF7EE` used intentionally; dark `#171717`
-  pill nav; text `#252332`/`#777487`; teal accent `#0E7C6B`; soft borders `#E7E0EB`.
-  All centralized in `tailwind.config.js` (`line` token for borders) — no scattered hex.
-- Authenticated pages have a pure-CSS 3D animated background
-  (`components/layout/AnimatedBackground.vue`): translucent pastel spheres
-  drifting in a perspective scene, slowly rotating wireframe rings, and
-  ambient particles. `position: fixed; z-index: -1; pointer-events: none`
-  — it never covers or blocks cards, dialogs, or inputs, and cards
-  themselves are never transformed. GPU-friendly transform/opacity-only
-  keyframes; `prefers-reduced-motion` renders a static scene; shapes shrink
-  at ≤768px. No new dependencies.
-- Responsive: bento collapses 4→2→stacked; login stacks to single column (panel hidden) on mobile;
-  table scrolls in-card at 390px. Class-level audit at 390/768/1280; no screenshot tooling
-  in this environment, so pixel-level review was not performed.
+## Live AWS deployment
 
-## Known limitations (Phase 1)
+**Public website:**
+https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws/
 
-- Single-process JSON-file store; no concurrent-write locking (fine for PoC).
-- Attachments: base64-in-JSON upload (dev PoC only), one attachment per
-  ticket, 5 MB cap; no multipart streaming. Bytes live in
-  `backend/data/uploads/`, never inside `db.json`.
-- Orphaned uploads (uploaded but never linked to a ticket) are swept at
-  server boot (`reapOrphans`).
-- Offset pagination (`page`/`limit`), no realtime updates, no password
-  security (dev header).
-- Runtime data lives in `backend/data/` (fixed this pass — it previously
-  resolved to `backend/src/data/`, inside the source tree).
+TickDesk is deployed using the following AWS services:
 
-## Future AWS integration (Phase 2, not started)
-
-| Local | AWS replacement |
+| Service | Purpose |
 |---|---|
-| `adapters/auth/devUsers.js` + `x-dev-user-id` | Cognito Hosted UI + verified JWT claims/role |
-| `handlers/*` + `app.js` | Lambda handlers behind API Gateway HTTP API (contracts unchanged) |
-| `JsonStore` repository | DynamoDB repository (same method signatures) |
-| `localAttachments` stub | Real S3 presigned-URL + browser-to-S3 upload |
-| `VITE_API_BASE_URL=localhost` | API Gateway URL via environment |
+| AWS Lambda Function URL | Public HTTPS Vue frontend |
+| Amazon Cognito | User signup, login and Customer/Agent roles |
+| Amazon API Gateway | JWT-protected backend endpoints |
+| AWS Lambda | Ticketing business logic |
+| Amazon DynamoDB | Tickets, comments and activity |
+| Amazon S3 | Private ticket attachments |
+
+### CloudFormation stacks
+
+- `tickdesk-poc-auth` — Cognito authentication
+- `tickdesk-poc-data` — DynamoDB tables
+- `tickdesk-poc-api` — Ticketing API and private S3 attachments
+- `tickdesk-poc-frontend-web` — Public Vue frontend
+
+### Frontend deployment
+
+The frontend hosting implementation is located in:
+
+- `frontend-hosting/handler.mjs`
+- `infrastructure/frontend-lambda.yaml`
+
+The built frontend files are generated rather than committed.
+
+To rebuild and deploy the frontend:
+
+1. Configure `frontend/.env.local` using the AWS values documented above.
+2. Run `npm run build`.
+3. Run `mkdir -p frontend-hosting/site`.
+4. Run `cp -a frontend/dist/. frontend-hosting/site/`.
+5. Deploy using AWS SAM with the following command:
+
+`sam deploy --template-file infrastructure/frontend-lambda.yaml --stack-name tickdesk-poc-frontend-web --region ap-south-1 --profile tickdesk-builder --resolve-s3 --capabilities CAPABILITY_IAM`
+
+### Verified functionality
+
+- Public HTTPS frontend access
+- Cognito Customer login and automatic Customer-group assignment
+- Customer and Agent ticket workflows
+- Ticket creation, editing, searching and filtering
+- Comments and activity history
+- Private S3 attachment upload and download
+- Customer authorization restrictions
+
+The public frontend was tested against the deployed AWS backend.
+
+### CloudFront limitation
+
+CloudFront was attempted, but AWS rejected distribution creation
+because the account requires additional verification.
+
+For this POC, the Vue frontend is successfully hosted through
+an AWS Lambda Function URL instead.
+
+### Costs
+
+AWS resources may incur charges. AWS Budget alerts do not
+automatically stop spending.

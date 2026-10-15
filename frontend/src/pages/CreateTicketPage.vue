@@ -46,7 +46,7 @@
           <label class="mt-2 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-white px-4 py-5 text-center hover:border-accent">
             <span class="text-sm font-medium text-ink">Choose a file to attach</span>
             <span class="text-xs text-muted">PNG, JPG, PDF or TXT · up to 5&nbsp;MB</span>
-            <input ref="fileInput" type="file" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onFileSelected" />
+            <input ref="fileInput" type="file" :disabled="uploading || submitting" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onFileSelected" />
           </label>
           <template v-if="attachment">
             <div class="mt-2 flex items-center gap-3 rounded-xl border border-line bg-white px-3 py-2.5">
@@ -70,12 +70,20 @@
             </p>
           </template>
           <p v-if="errors.attachment" class="mt-2 text-xs text-rose-600">{{ errors.attachment }}</p>
+          <button
+            v-if="errors.attachment"
+            type="button"
+            class="mt-2 text-xs font-semibold text-accent underline"
+            @click="removeAttachment"
+          >
+            Continue without an attachment
+          </button>
         </section>
 
         <p v-if="errors.form" role="alert" class="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ errors.form }}</p>
 
         <div class="mt-6 flex gap-2">
-          <AppButton type="submit" variant="accent" :loading="submitting" :disabled="submitting">Create Ticket</AppButton>
+          <AppButton type="submit" variant="accent" :loading="submitting" :disabled="submitting || uploading">Create Ticket</AppButton>
           <AppButton variant="light" type="button" @click="$router.push('/')">Cancel</AppButton>
         </div>
       </form>
@@ -105,6 +113,8 @@ import { CATEGORIES, PRIORITIES } from "../constants/index.js";
 import { useToast } from "../composables/useToast.js";
 import { api } from "../services/api.js";
 
+const cloudApiMode = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
+
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "application/pdf", "text/plain"]);
 
@@ -133,25 +143,30 @@ function formatSize(bytes) {
 // Upload immediately on selection so failures surface before submit.
 async function onFileSelected(e) {
   const f = e.target.files?.[0];
-  if (!f) return;
+  if (!f || uploading.value || submitting.value) return;
+
+  attachment.value = null;
+  uploaded.value = false;
   errors.attachment = "";
+
   if (!ALLOWED_TYPES.has(f.type)) {
     errors.attachment = "Unsupported file type. Allowed: PNG, JPG, PDF, TXT.";
     return;
   }
-  if (f.size > MAX_BYTES) {
-    errors.attachment = "File exceeds the 5 MB limit.";
+  if (f.size < 1 || f.size > MAX_BYTES) {
+    errors.attachment = "File must be between 1 byte and 5 MB.";
     return;
   }
   uploading.value = true;
   try {
-    const contentBase64 = await readAsBase64(f);
-    const meta = await api.uploadAttachment({
-      fileName: f.name,
-      mimeType: f.type,
-      size: f.size,
-      contentBase64,
-    });
+    const meta = cloudApiMode
+      ? await api.uploadFile(f)
+      : await api.uploadAttachment({
+          fileName: f.name,
+          mimeType: f.type,
+          size: f.size,
+          contentBase64: await readAsBase64(f),
+        });
     attachment.value = { fileName: f.name, mimeType: f.type, size: f.size, fileKey: meta.fileKey };
     uploaded.value = true;
   } catch (err) {
@@ -185,6 +200,11 @@ function removeAttachment() {
 
 async function submit() {
   if (submitting.value || uploading.value) return; // duplicate-submit guard
+
+  if (errors.attachment) {
+    errors.form = "Fix the attachment error or continue without a file.";
+    return;
+  }
   Object.keys(errors).forEach((k) => delete errors[k]);
   errors.details = {};
   submitting.value = true;

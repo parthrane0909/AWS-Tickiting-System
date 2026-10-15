@@ -34,7 +34,7 @@ function uploadAs(svc, storage, user, overrides = {}) {
   return meta;
 }
 
-test("valid upload stores bytes; ticket links metadata; detail returns it", () => {
+test("valid upload stores bytes; ticket links metadata; detail returns it", async () => {
   const { dir, storage, svc } = fresh();
   const meta = uploadAs(svc, storage, alice);
   assert.ok(meta.fileKey.startsWith("local/"));
@@ -43,23 +43,23 @@ test("valid upload stores bytes; ticket links metadata; detail returns it", () =
   const dbFile = path.join(dir, "db.json");
   const db = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, "utf8")) : null;
   if (db) assert.ok(!JSON.stringify(db).includes("hello world")); // JSON stays clean
-  const t = svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
   assert.equal(t.attachment.fileKey, meta.fileKey);
-  assert.equal(svc.get(t.id, alice).attachment.fileName, "notes.txt");
+  assert.equal((await svc.get(t.id, alice)).attachment.fileName, "notes.txt");
 });
 
-test("download returns exact bytes; auth enforced (owner ok, other customer denied, agent allowed)", () => {
+test("download returns exact bytes; auth enforced (owner ok, other customer denied, agent allowed)", async () => {
   const { svc, storage } = fresh();
   const meta = uploadAs(svc, storage, alice);
-  const t = svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
-  const got = svc.downloadAttachment(t.id, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
+  const got = await svc.downloadAttachment(t.id, alice);
   assert.equal(Buffer.from("hello world").toString("base64"), got.bytes.toString("base64"));
   assert.equal(got.mimeType, "text/plain");
-  assert.throws(() => svc.downloadAttachment(t.id, bob), (e) => e.status === 403);
-  assert.ok(svc.downloadAttachment(t.id, eve).bytes.length > 0);
+  await assert.rejects(() => svc.downloadAttachment(t.id, bob), (e) => e.status === 403);
+  assert.ok((await svc.downloadAttachment(t.id, eve)).bytes.length > 0);
 });
 
-test("oversize, bad type, empty content, size mismatch rejected", () => {
+test("oversize, bad type, empty content, size mismatch rejected", async () => {
   const { storage } = fresh();
   assert.throws(
     () => storage.store({ fileName: "big.pdf", mimeType: "application/pdf", size: 6 * 1024 * 1024, contentBase64: png("x") }, alice.id),
@@ -79,7 +79,7 @@ test("oversize, bad type, empty content, size mismatch rejected", () => {
   );
 });
 
-test("path traversal filenames are neutralized in storage", () => {
+test("path traversal filenames are neutralized in storage", async () => {
   assert.equal(sanitizeFileName("../../etc/passwd"), "passwd");
   assert.equal(sanitizeFileName("..."), "file");
   const { dir, storage } = fresh();
@@ -88,79 +88,79 @@ test("path traversal filenames are neutralized in storage", () => {
   assert.deepEqual(fs.readdirSync(path.join(dir, "uploads")).length, 1);
 });
 
-test("unknown fileKey aborts creation — no ticket, no false success", () => {
+test("unknown fileKey aborts creation — no ticket, no false success", async () => {
   const { svc } = fresh();
-  assert.throws(
+  await assert.rejects(
     () => svc.create({ ...valid, attachment: { fileName: "ghost.txt", fileKey: "local/nope/ghost.txt" } }, alice),
     (e) => e.status === 400,
   );
-  assert.equal(svc.list({ page: 1, limit: 20 }, alice).total, 0);
+  assert.equal((await svc.list({ page: 1, limit: 20 }, alice)).total, 0);
 });
 
-test("attachment replace/remove on own OPEN ticket; orphan bytes cleaned", () => {
+test("attachment replace/remove on own OPEN ticket; orphan bytes cleaned", async () => {
   const { dir, storage, svc } = fresh();
   const m1 = uploadAs(svc, storage, alice);
-  const t = svc.create({ ...valid, attachment: { fileName: m1.fileName, fileKey: m1.fileKey } }, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: m1.fileName, fileKey: m1.fileKey } }, alice);
   const m2 = storage.store({ fileName: "v2.txt", mimeType: "text/plain", size: 5, contentBase64: png("v2-ok") }, alice.id);
-  const replaced = svc.update(t.id, { attachment: { fileName: m2.fileName, fileKey: m2.fileKey } }, alice);
+  const replaced = await svc.update(t.id, { attachment: { fileName: m2.fileName, fileKey: m2.fileKey } }, alice);
   assert.equal(replaced.attachment.fileKey, m2.fileKey);
   assert.equal(fs.readdirSync(path.join(dir, "uploads")).length, 1); // old bytes gone
-  const removed = svc.update(t.id, { attachment: null }, alice);
+  const removed = await svc.update(t.id, { attachment: null }, alice);
   assert.equal(removed.attachment, null);
   assert.equal(fs.readdirSync(path.join(dir, "uploads")).length, 0);
-  assert.throws(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
+  await assert.rejects(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
 });
 
-test("orphan sweeper removes unlinked uploads, keeps linked ones", () => {
+test("orphan sweeper removes unlinked uploads, keeps linked ones", async () => {
   const { dir, storage, svc } = fresh();
   const orphan = uploadAs(svc, storage, alice);
   const linked = uploadAs(svc, storage, alice, { fileName: "keep.txt" });
-  svc.create({ ...valid, attachment: { fileName: linked.fileName, fileKey: linked.fileKey } }, alice);
+  await svc.create({ ...valid, attachment: { fileName: linked.fileName, fileKey: linked.fileKey } }, alice);
   const reaped = storage.reapOrphans();
   assert.equal(reaped, 1);
   assert.ok(!fs.existsSync(path.join(dir, "uploads", `${orphan.attachmentId}_${orphan.fileName}`)));
   assert.equal(fs.readdirSync(path.join(dir, "uploads")).length, 1);
 });
 
-test("nonexistent ticket and ticket-without-attachment return 404", () => {
+test("nonexistent ticket and ticket-without-attachment return 404", async () => {
   const { svc, storage } = fresh();
-  assert.throws(() => svc.downloadAttachment("TIX-DOESNOTEXIST", alice), (e) => e.status === 404);
-  const t = svc.create(valid, alice);
-  assert.throws(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
+  await assert.rejects(() => svc.downloadAttachment("TIX-DOESNOTEXIST", alice), (e) => e.status === 404);
+  const t = await svc.create(valid, alice);
+  await assert.rejects(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
 });
 
-test("missing file on disk is handled gracefully (404, no crash)", () => {
+test("missing file on disk is handled gracefully (404, no crash)", async () => {
   const { dir, storage, svc } = fresh();
   const meta = uploadAs(svc, storage, alice);
-  const t = svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
   // Simulate the stored file being deleted behind the metadata's back.
   fs.unlinkSync(path.join(dir, "uploads", `${meta.attachmentId}_${meta.fileName}`));
-  assert.throws(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
+  await assert.rejects(() => svc.downloadAttachment(t.id, alice), (e) => e.status === 404);
 });
 
-test("attachment survives backend restart (fresh service instance, same dir)", () => {
+test("attachment survives backend restart (fresh service instance, same dir)", async () => {
   const { dir, storage, svc } = fresh();
   const meta = uploadAs(svc, storage, alice);
-  const t = svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
   // Simulate a restart: brand-new repository + storage instances on the same data dir.
   const restarted = createTicketService(createRepository(dir), createStorage(dir));
-  const got = restarted.downloadAttachment(t.id, alice);
+  const got = await restarted.downloadAttachment(t.id, alice);
   assert.equal(Buffer.from("hello world").toString("base64"), got.bytes.toString("base64"));
   assert.equal(got.mimeType, "text/plain");
   assert.equal(got.fileName, "notes.txt");
 });
 
-test("ticket updates do not remove or corrupt a valid attachment", () => {
+test("ticket updates do not remove or corrupt a valid attachment", async () => {
   const { storage, svc } = fresh();
   const meta = uploadAs(svc, storage, alice);
-  const t = svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
+  const t = await svc.create({ ...valid, attachment: { fileName: meta.fileName, fileKey: meta.fileKey } }, alice);
   // Customer edits details (no attachment field in the patch).
-  svc.update(t.id, { title: "Updated title", priority: "HIGH" }, alice);
+  await svc.update(t.id, { title: "Updated title", priority: "HIGH" }, alice);
   // Agent changes workflow state.
-  svc.update(t.id, { status: "IN_PROGRESS", assigneeId: "agent_eve" }, eve);
-  const got = svc.downloadAttachment(t.id, alice);
+  await svc.update(t.id, { status: "IN_PROGRESS", assigneeId: "agent_eve" }, eve);
+  const got = await svc.downloadAttachment(t.id, alice);
   assert.equal(Buffer.from("hello world").toString("base64"), got.bytes.toString("base64"));
-  assert.equal(svc.get(t.id, alice).attachment.fileKey, meta.fileKey);
+  assert.equal((await svc.get(t.id, alice)).attachment.fileKey, meta.fileKey);
 });
 
 test("HTTP: customer upload + download round-trip; agent upload rejected", async () => {

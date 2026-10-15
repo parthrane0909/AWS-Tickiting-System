@@ -29,3 +29,15 @@ node_modules/
 backend/data/db.json
 dist/
 .env
+.lambda-source/
+
+frontend-hosting/site/
+
+/IMPLEMENTATION_PLAN.md
+/FINAL_SUBMISSION.md
+/frontend-hosting/site/
+/backend/data/uploads.json
+/backend/data/uploads/
+/TickDesk-FINAL.zip
+/infrastructure/frontend-hosting.yaml
+/infrastructure/frontend-hosting-retry.yaml

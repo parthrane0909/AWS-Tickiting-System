@@ -10,7 +10,27 @@
         <h1 class="anim-rise stagger-1 mt-8 text-2xl font-bold">Welcome back</h1>
         <p class="anim-rise stagger-2 mt-1 text-sm text-muted">Sign in to track requests and collaborate with support.</p>
 
-        <form class="anim-rise stagger-2 mt-6 flex flex-col gap-4" @submit.prevent="submit" novalidate>
+        <div v-if="cognitoMode" class="anim-rise stagger-2 mt-6">
+          <AppButton
+            type="button"
+            variant="accent"
+            class="w-full !py-2.5"
+            @click="cognitoSignIn"
+          >
+            Sign in with AWS Cognito
+          </AppButton>
+
+          <p class="mt-3 text-center text-xs text-muted">
+            Secure Customer and Agent authentication
+          </p>
+
+          <p v-if="authError" role="alert"
+             class="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {{ authError }}
+          </p>
+        </div>
+
+        <form v-else class="anim-rise stagger-2 mt-6 flex flex-col gap-4" @submit.prevent="submit" novalidate>
           <label class="block">
             <span class="mb-1 block text-xs font-semibold">Email Address</span>
             <input
@@ -47,7 +67,7 @@
           <p v-if="authError" role="alert" class="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ authError }}</p>
         </form>
 
-        <details class="mt-4 rounded-xl border border-dashed border-line bg-lavender/40 px-3 py-2 text-xs">
+        <details v-if="!cognitoMode" class="mt-4 rounded-xl border border-dashed border-line bg-lavender/40 px-3 py-2 text-xs">
           <summary class="cursor-pointer font-semibold text-ink">Local development access (test identities)</summary>
           <div v-if="devUsers.length === 0" class="py-2 text-muted">Loading…</div>
           <ul class="mt-2 flex flex-col gap-1.5">
@@ -111,8 +131,10 @@ import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppButton from "../components/common/AppButton.vue";
 import { api } from "../services/api.js";
+import { beginCognitoLogin } from "../services/cognitoOAuth.js";
 import { useAuthStore } from "../stores/auth.js";
 
+const cognitoMode = import.meta.env.VITE_AUTH_MODE === "cognito";
 const email = ref("");
 const password = ref("");
 const showPassword = ref(false);
@@ -125,6 +147,7 @@ const router = useRouter();
 const route = useRoute();
 
 onMounted(async () => {
+  if (cognitoMode) return;
   // Dev-only helper: identity list for the disclosure. Not part of sign-in itself.
   try {
     devUsers.value = await api.devUsers();
@@ -138,6 +161,15 @@ function fill(addr) {
   email.value = addr;
   password.value = "local-dev-pass";
   authError.value = "";
+}
+
+async function cognitoSignIn() {
+  authError.value = "";
+  try {
+    await beginCognitoLogin();
+  } catch (error) {
+    authError.value = error.message;
+  }
 }
 
 async function submit() {

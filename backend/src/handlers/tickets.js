@@ -2,16 +2,27 @@ import { CATEGORIES, PRIORITIES, STATUSES } from "../constants.js";
 import { DEV_USERS, verifyDevCredentials } from "../adapters/auth/devUsers.js";
 import { resolveDataDir } from "../adapters/persistence/jsonStore.js";
 import { createStorage } from "../adapters/storage/localAttachments.js";
+import { createS3Storage } from "../adapters/storage/s3Attachments.js";
 import { authenticate } from "../middleware/auth.js";
 import { readJsonBody, sendError, sendJson } from "../middleware/json.js";
-import { createRepository } from "../repositories/ticketRepository.js";
+import { createConfiguredRepository } from "../repositories/configuredRepository.js";
 import { createTicketService } from "../services/ticketService.js";
+import { createAgentDirectory } from "../adapters/auth/agentDirectory.js";
 import { badRequest, forbidden } from "../utils/errors.js";
 
 const dataDir = resolveDataDir();
-const repo = createRepository(dataDir);
-const storage = createStorage(dataDir);
-const service = createTicketService(repo, storage);
+const persistenceBackend = process.env.PERSISTENCE_BACKEND || "json";
+const repo = createConfiguredRepository({
+  backend: persistenceBackend,
+  dataDir
+});
+const storage = persistenceBackend === "json"
+  ? createStorage(dataDir)
+  : persistenceBackend === "dynamodb" && process.env.ATTACHMENTS_BUCKET
+    ? createS3Storage()
+    : null;
+const agentDirectory = createAgentDirectory();
+const service = createTicketService(repo, storage, agentDirectory);
 
 // Upload bodies carry base64 file bytes; all other JSON bodies stay small.
 const UPLOAD_BODY_LIMIT = 8 * 1024 * 1024;
@@ -41,6 +52,26 @@ export async function handleRequest(req, res) {
   const path = url.pathname;
   const method = req.method.toUpperCase();
 
+  const authMode = process.env.AUTH_MODE || "dev";
+
+  if (
+    authMode !== "dev" &&
+    (path === "/api/dev-users" || path === "/api/dev-login")
+  ) {
+    return sendJson(res, 404, {
+      error: { message: "Not found." }
+    });
+  }
+
+  if (method === "GET" && path === "/api/me") {
+    try {
+      const user = await authenticate(req);
+      return sendJson(res, 200, { data: user });
+    } catch (err) {
+      return sendError(res, err);
+    }
+  }
+
   // Public (dev-only): health + dev identity listing for the login screen.
   if (method === "GET" && path === "/api/health") return sendJson(res, 200, { data: { ok: true } });
   if (method === "GET" && path === "/api/dev-users") {
@@ -66,34 +97,77 @@ export async function handleRequest(req, res) {
   }
 
   // All ticket routes require dev auth.
-  if (!path.startsWith("/api/tickets") && path !== "/api/attachments") {
+  if (
+    !path.startsWith("/api/tickets") &&
+    path !== "/api/attachments" &&
+    path !== "/api/attachments/presign" &&
+    path !== "/api/agents"
+  ) {
     return sendJson(res, 404, { error: { message: "Not found." } });
   }
 
   let user;
   try {
-    user = authenticate(req);
+    user = await authenticate(req);
   } catch (err) {
     return sendError(res, err);
   }
 
   try {
+    // Only authenticated Agents may access the Agent directory.
+    if (method === "GET" && path === "/api/agents") {
+      if (user.role !== "agent") {
+        throw forbidden("Only agents can view the agent directory.");
+      }
+
+      return sendJson(res, 200, {
+        data: await agentDirectory.list()
+      });
+    }
+
+    // POST /api/attachments/presign — direct S3 upload authorization.
+    if (method === "POST" && (
+      path === "/api/attachments/presign" ||
+      path === "/api/tickets/presigned-url"
+    )) {
+      if (user.role !== "customer") {
+        throw forbidden("Only customers can upload attachments.");
+      }
+
+      if (!storage?.createUpload) {
+        return sendJson(res, 501, {
+          error: { message: "S3 attachment uploads are not configured." }
+        });
+      }
+
+      const body = await readJsonBody(req);
+
+      return sendJson(res, 200, {
+        data: await storage.createUpload(body, user.id)
+      });
+    }
+
     // POST /api/attachments — genuine local upload (customers only).
     // Replaces the former presigned-url stub, which returned a fake URL.
     if (method === "POST" && path === "/api/attachments") {
       if (user.role !== "customer") throw forbidden("Only customers can upload attachments.");
+      if (!storage?.store) {
+        return sendJson(res, 501, {
+          error: { message: "Attachments require S3 in DynamoDB mode." }
+        });
+      }
       const body = await readJsonBody(req, UPLOAD_BODY_LIMIT);
       return sendJson(res, 201, { data: storage.store(body, user.id) });
     }
     // POST /api/tickets
     if (method === "POST" && path === "/api/tickets") {
       const body = await readJsonBody(req);
-      return sendJson(res, 201, { data: service.create(body, user) });
+      return sendJson(res, 201, { data: await service.create(body, user) });
     }
     // GET /api/tickets (list)
     if (method === "GET" && path === "/api/tickets") {
       const q = sanitizeListQuery(queryOf(url));
-      const result = service.list(q, user);
+      const result = await service.list(q, user);
       return sendJson(res, 200, { data: result.items, meta: { total: result.total, page: result.page, limit: result.limit } });
     }
     // Ticket-scoped routes
@@ -101,13 +175,20 @@ export async function handleRequest(req, res) {
     if (m) {
       const ticketId = decodeURIComponent(m[1]);
       const sub = m[3];
-      if (method === "GET" && !sub) return sendJson(res, 200, { data: service.get(ticketId, user) });
+      if (method === "GET" && !sub) return sendJson(res, 200, { data: await service.get(ticketId, user) });
       if (method === "PUT" && !sub) {
         const body = await readJsonBody(req);
-        return sendJson(res, 200, { data: service.update(ticketId, body, user) });
+        return sendJson(res, 200, { data: await service.update(ticketId, body, user) });
       }
       if (method === "GET" && sub === "attachment") {
-        const file = service.downloadAttachment(ticketId, user);
+        const file = await service.downloadAttachment(ticketId, user);
+
+        // S3: return a short-lived URL after authorization.
+        // Local storage: preserve the existing binary response.
+        if (file.url) {
+          return sendJson(res, 200, { data: file });
+        }
+
         res.writeHead(200, {
           "content-type": file.mimeType,
           "content-length": file.bytes.length,
@@ -116,12 +197,12 @@ export async function handleRequest(req, res) {
         res.end(file.bytes);
         return;
       }
-      if (method === "GET" && sub === "comments") return sendJson(res, 200, { data: service.listComments(ticketId, user) });
+      if (method === "GET" && sub === "comments") return sendJson(res, 200, { data: await service.listComments(ticketId, user) });
       if (method === "POST" && sub === "comments") {
         const body = await readJsonBody(req);
-        return sendJson(res, 201, { data: service.addComment(ticketId, body, user) });
+        return sendJson(res, 201, { data: await service.addComment(ticketId, body, user) });
       }
-      if (method === "GET" && sub === "history") return sendJson(res, 200, { data: service.history(ticketId, user) });
+      if (method === "GET" && sub === "history") return sendJson(res, 200, { data: await service.history(ticketId, user) });
     }
     return sendJson(res, 404, { error: { message: "Not found." } });
   } catch (err) {
