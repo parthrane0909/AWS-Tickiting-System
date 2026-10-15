@@ -4,6 +4,71 @@ Description: TickDesk Cognito authentication infrastructure
 
 Resources:
 
+  # Newly confirmed self-signups have no Cognito groups by default.
+  # This trigger grants only the Customer role, never the Agent role.
+  AutoAssignCustomerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AssignNewCognitoCustomers
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminListGroupsForUser
+                  - cognito-idp:AdminAddUserToGroup
+                # Pool ARN cannot reference TicketingUserPool here: it would
+                # create a CloudFormation dependency cycle through LambdaConfig.
+                # Lambda invocation is additionally restricted to this pool.
+                Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*'
+
+  AutoAssignCustomerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Assign newly confirmed Cognito self-signups to Customer
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Timeout: 10
+      MemorySize: 128
+      Role: !GetAtt AutoAssignCustomerRole.Arn
+      Code:
+        ZipFile: |
+          const { CognitoIdentityProviderClient, AdminListGroupsForUserCommand, AdminAddUserToGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+          const cognito = new CognitoIdentityProviderClient({});
+          exports.handler = async (event) => {
+            // Only confirmed self-signups: do not alter forgot-password or other events.
+            if (event.triggerSource !== 'PostConfirmation_ConfirmSignUp') return event;
+            const UserPoolId = event.userPoolId;
+            const Username = event.userName;
+            if (!UserPoolId || !Username) throw new Error('Missing Cognito identity.');
+            const existing = await cognito.send(new AdminListGroupsForUserCommand({ UserPoolId, Username }));
+            const groups = new Set((existing.Groups || []).map(group => group.GroupName));
+            // Avoid multiple conflicting roles; Agent assignment remains admin-controlled.
+            if (!groups.has('Customer') && !groups.has('Agent')) {
+              await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId, Username, GroupName: 'Customer' }));
+            }
+            return event;
+          };
+
+  AutoAssignCustomerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AutoAssignCustomerFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt TicketingUserPool.Arn
+      SourceAccount: !Ref AWS::AccountId
+
   TicketingUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -12,6 +77,8 @@ Resources:
         Project: TickDeskPOC
       UserPoolTier: ESSENTIALS
       DeletionProtection: ACTIVE
+      LambdaConfig:
+        PostConfirmation: !GetAtt AutoAssignCustomerFunction.Arn
 
       UsernameAttributes:
         - email

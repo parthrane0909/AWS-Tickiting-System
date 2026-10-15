@@ -126,7 +126,10 @@ export async function handleRequest(req, res) {
     }
 
     // POST /api/attachments/presign — direct S3 upload authorization.
-    if (method === "POST" && path === "/api/attachments/presign") {
+    if (method === "POST" && (
+      path === "/api/attachments/presign" ||
+      path === "/api/tickets/presigned-url"
+    )) {
       if (user.role !== "customer") {
         throw forbidden("Only customers can upload attachments.");
       }

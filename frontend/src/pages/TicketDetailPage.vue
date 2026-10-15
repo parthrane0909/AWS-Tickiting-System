@@ -32,23 +32,21 @@
             <dd class="flex flex-wrap items-center gap-2">
               <span class="font-medium">{{ ticket.attachment.fileName }}</span>
               <span class="text-xs text-muted">{{ formatSize(ticket.attachment.size) }} · {{ ticket.attachment.mimeType }}</span>
-              <AppButton v-if="!cloudApiMode" variant="light" :loading="downloading" @click="downloadAttachment">Download</AppButton>
-              <span v-else class="text-xs text-muted">
-                Download available after S3 integration.
-              </span>
-              <template v-if="canEdit && !cloudApiMode">
+              <AppButton
+                variant="light"
+                :loading="downloading"
+                :disabled="attachmentBusy"
+                @click="downloadAttachment"
+              >
+                Download
+              </AppButton>
+              <template v-if="canEdit">
                 <label class="t-control cursor-pointer rounded-pill border border-line px-2.5 py-1 text-xs font-semibold hover:bg-lavender">
                   Replace
-                  <input ref="replaceInput" type="file" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onReplaceFile" />
+                  <input ref="replaceInput" type="file" :disabled="attachmentBusy || downloading" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onReplaceFile" />
                 </label>
-                <AppButton variant="danger" @click="removeAttachment">Remove</AppButton>
+                <AppButton variant="danger" :disabled="attachmentBusy || downloading" @click="removeAttachment">Remove</AppButton>
               </template>
-            </dd>
-          </div>
-          <div v-else-if="cloudApiMode" class="sm:col-span-2">
-            <dt class="text-xs text-muted">Attachment</dt>
-            <dd class="text-sm text-muted">
-              Attachments will be available after S3 integration.
             </dd>
           </div>
           <div v-else-if="canEdit" class="sm:col-span-2">
@@ -56,11 +54,12 @@
             <dd>
               <label class="t-control inline-block cursor-pointer rounded-pill border border-line px-2.5 py-1 text-xs font-semibold hover:bg-lavender">
                 Add attachment
-                <input ref="replaceInput" type="file" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onReplaceFile" />
+                <input ref="replaceInput" type="file" :disabled="attachmentBusy || downloading" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onReplaceFile" />
               </label>
             </dd>
           </div>
         </dl>
+        <p v-if="attachmentBusy" class="mt-2 text-xs text-muted">Uploading and saving attachment…</p>
 
         <!-- Customer edit (own OPEN tickets) / Agent workflow controls -->
         <div class="mt-4 flex flex-wrap gap-2">
@@ -258,32 +257,89 @@ async function downloadAttachment() {
   }
 }
 
+const attachmentBusy = ref(false);
+const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+const ATTACHMENT_TYPES = new Set([
+  "image/png", "image/jpeg", "application/pdf", "text/plain"
+]);
+
 // Replace or add an attachment on an own OPEN ticket.
 async function onReplaceFile(e) {
   const f = e.target.files?.[0];
-  if (!f) return;
+
+  if (!f || attachmentBusy.value || downloading.value) return;
+
+  if (!ATTACHMENT_TYPES.has(f.type)) {
+    push("Unsupported file type. Use PNG, JPG, PDF or TXT.", "error");
+    if (replaceInput.value) replaceInput.value.value = "";
+    return;
+  }
+
+  if (f.size < 1 || f.size > ATTACHMENT_MAX_BYTES) {
+    push("File must be between 1 byte and 5 MB.", "error");
+    if (replaceInput.value) replaceInput.value.value = "";
+    return;
+  }
+
+  attachmentBusy.value = true;
+
   try {
-    const contentBase64 = await readAsBase64(f);
-    const meta = await api.uploadAttachment({ fileName: f.name, mimeType: f.type, size: f.size, contentBase64 });
+    const meta = cloudApiMode
+      ? await api.uploadFile(f)
+      : await api.uploadAttachment({
+          fileName: f.name,
+          mimeType: f.type,
+          size: f.size,
+          contentBase64: await readAsBase64(f),
+        });
+
+    if (!meta?.fileKey) {
+      throw new Error("Upload did not return an attachment key.");
+    }
+
     ticket.value = await api.updateTicket(ticketId, {
-      attachment: { fileName: f.name, fileKey: meta.fileKey },
+      attachment: {
+        fileName: f.name,
+        fileKey: meta.fileKey,
+      },
     });
-    activity.value = await api.history(ticketId);
+
     push("Attachment saved.");
+
+    try {
+      activity.value = await api.history(ticketId);
+    } catch {
+      push("Attachment saved, but activity could not refresh.", "error");
+    }
   } catch (err) {
-    push(err.message, "error");
+    push(err.message || "Attachment upload failed.", "error");
   } finally {
+    attachmentBusy.value = false;
     if (replaceInput.value) replaceInput.value.value = "";
   }
 }
 
 async function removeAttachment() {
+  if (attachmentBusy.value || downloading.value) return;
+
+  attachmentBusy.value = true;
+
   try {
-    ticket.value = await api.updateTicket(ticketId, { attachment: null });
-    activity.value = await api.history(ticketId);
+    ticket.value = await api.updateTicket(ticketId, {
+      attachment: null,
+    });
+
     push("Attachment removed.");
-  } catch (e) {
-    push(e.message, "error");
+
+    try {
+      activity.value = await api.history(ticketId);
+    } catch {
+      push("Attachment removed, but activity could not refresh.", "error");
+    }
+  } catch (err) {
+    push(err.message || "Could not remove attachment.", "error");
+  } finally {
+    attachmentBusy.value = false;
   }
 }
 
