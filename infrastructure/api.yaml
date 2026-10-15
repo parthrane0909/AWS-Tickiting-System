@@ -130,6 +130,40 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  TicketingAttachmentsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - !Ref FrontendOrigin
+            AllowedMethods:
+              - POST
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - '*'
+            ExposedHeaders:
+              - ETag
+            MaxAge: 300
+
   TicketingLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -137,6 +171,10 @@ Resources:
       RetentionInDays: 7
 
 Outputs:
+  AttachmentsBucketName:
+    Description: Private S3 bucket for ticket attachments
+    Value: !Ref TicketingAttachmentsBucket
+
   ApiUrl:
     Description: TickDesk HTTPS API endpoint
     Value: !Sub 'https://${TicketingHttpApi}.execute-api.${AWS::Region}.amazonaws.com'
