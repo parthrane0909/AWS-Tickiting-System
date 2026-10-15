@@ -32,14 +32,23 @@
             <dd class="flex flex-wrap items-center gap-2">
               <span class="font-medium">{{ ticket.attachment.fileName }}</span>
               <span class="text-xs text-muted">{{ formatSize(ticket.attachment.size) }} · {{ ticket.attachment.mimeType }}</span>
-              <AppButton variant="light" :loading="downloading" @click="downloadAttachment">Download</AppButton>
-              <template v-if="canEdit">
+              <AppButton v-if="!cloudApiMode" variant="light" :loading="downloading" @click="downloadAttachment">Download</AppButton>
+              <span v-else class="text-xs text-muted">
+                Download available after S3 integration.
+              </span>
+              <template v-if="canEdit && !cloudApiMode">
                 <label class="t-control cursor-pointer rounded-pill border border-line px-2.5 py-1 text-xs font-semibold hover:bg-lavender">
                   Replace
                   <input ref="replaceInput" type="file" class="sr-only" accept="image/png,image/jpeg,application/pdf,text/plain" @change="onReplaceFile" />
                 </label>
                 <AppButton variant="danger" @click="removeAttachment">Remove</AppButton>
               </template>
+            </dd>
+          </div>
+          <div v-else-if="cloudApiMode" class="sm:col-span-2">
+            <dt class="text-xs text-muted">Attachment</dt>
+            <dd class="text-sm text-muted">
+              Attachments will be available after S3 integration.
             </dd>
           </div>
           <div v-else-if="canEdit" class="sm:col-span-2">
@@ -151,6 +160,8 @@ import StatusBadge from "../components/common/StatusBadge.vue";
 import { CATEGORIES, PRIORITIES, STATUSES, STATUS_LABELS } from "../constants/index.js";
 import { useToast } from "../composables/useToast.js";
 import { api } from "../services/api.js";
+
+const cloudApiMode = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
 import { useAuthStore } from "../stores/auth.js";
 
 const props = defineProps({ id: String });

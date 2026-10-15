@@ -5,6 +5,7 @@ import {
 } from "./cognitoOAuth.js";
 
 const BASE = import.meta.env.VITE_API_BASE_URL || "";
+const CLOUD_API = BASE.trim().length > 0;
 
 function userHeaders() {
   if (import.meta.env.VITE_AUTH_MODE === "cognito") {
@@ -52,7 +53,9 @@ devLogin: (email, password) =>
   devUsers: () => request("/api/dev-users").then((r) => r.data),
   agents: () => request("/api/agents").then((r) => r.data),
   uploadAttachment: (payload) =>
-    request("/api/attachments", { method: "POST", body: payload }).then((r) => r.data),
+    CLOUD_API
+      ? Promise.reject(new Error("Attachments require S3 integration in AWS mode."))
+      : request("/api/attachments", { method: "POST", body: payload }).then((r) => r.data),
   listTickets: (params = {}) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) if (v) q.set(k, v);
@@ -70,6 +73,9 @@ devLogin: (email, password) =>
   // body stream, which previously made the following res.blob() throw
   // "Body has already been read" and broke every successful download.
   downloadAttachment: async (ticketId) => {
+    if (CLOUD_API) {
+      throw new Error("Attachment downloads require S3 integration in AWS mode.");
+    }
     const res = await fetch(`${BASE}/api/tickets/${encodeURIComponent(ticketId)}/attachment`, {
       headers: userHeaders(),
     });

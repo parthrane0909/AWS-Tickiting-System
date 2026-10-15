@@ -41,7 +41,7 @@
         </div>
 
         <!-- Attachment section -->
-        <section class="mt-5 rounded-2xl bg-cream p-4">
+        <section v-if="!cloudApiMode" class="mt-5 rounded-2xl bg-cream p-4">
           <p class="text-xs font-semibold uppercase tracking-wide text-muted">Attachment (optional)</p>
           <label class="mt-2 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line bg-white px-4 py-5 text-center hover:border-accent">
             <span class="text-sm font-medium text-ink">Choose a file to attach</span>
@@ -71,6 +71,15 @@
           </template>
           <p v-if="errors.attachment" class="mt-2 text-xs text-rose-600">{{ errors.attachment }}</p>
         </section>
+        <section v-else class="mt-5 rounded-2xl bg-cream p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-muted">
+            Attachment (optional)
+          </p>
+          <p class="mt-2 text-sm text-muted">
+            Attachments will be available after S3 integration.
+            You can create tickets without files.
+          </p>
+        </section>
 
         <p v-if="errors.form" role="alert" class="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ errors.form }}</p>
 
@@ -85,7 +94,7 @@
         <ul class="mt-3 flex flex-col gap-2.5 text-sm">
           <li class="flex gap-2"><span class="text-accent">✓</span><span>Include steps to reproduce the issue.</span></li>
           <li class="flex gap-2"><span class="text-accent">✓</span><span>Mention expected vs actual behavior.</span></li>
-          <li class="flex gap-2"><span class="text-accent">✓</span><span>Attach screenshots or logs if relevant.</span></li>
+          <li v-if="!cloudApiMode" class="flex gap-2"><span class="text-accent">✓</span><span>Attach screenshots or logs if relevant.</span></li>
         </ul>
         <p class="mt-4 rounded-xl bg-mint px-3 py-2 text-xs text-accentdark">
           Your ticket is routed to the support team automatically. You can edit it while it is Open.
@@ -104,6 +113,8 @@ import AppSelect from "../components/common/AppSelect.vue";
 import { CATEGORIES, PRIORITIES } from "../constants/index.js";
 import { useToast } from "../composables/useToast.js";
 import { api } from "../services/api.js";
+
+const cloudApiMode = Boolean(import.meta.env.VITE_API_BASE_URL?.trim());
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "application/pdf", "text/plain"]);
