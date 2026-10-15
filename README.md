@@ -45,7 +45,7 @@ VITE_COGNITO_DOMAIN=https://tickdesk-685394474319-ap-south-1.auth.ap-south-1.ama
 npm run dev:frontend
 ```
 
-Use the Cognito Hosted UI, not the local dev-login form. `http://localhost:5173/auth/callback` is registered in the Cognito app client. The frontend remains on localhost for this POC: **there is no publicly hosted Vue site**. A running Vite server and internet connection are needed to demonstrate it. Do not include real passwords, tokens, signed URLs, or AWS credentials in the repository or screenshots.
+Use the Cognito Hosted UI, not the local dev-login form. `http://localhost:5173/auth/callback` is registered in the Cognito app client. The Vue frontend is deployed publicly on AWS using a Lambda Function URL. Users can access TickDesk without running a local server. Local Vite remains available for development. Do not include real passwords, tokens, signed URLs, or AWS credentials in the repository or screenshots.
 
 The deployed Cognito post-confirmation Lambda automatically assigns newly confirmed self-signups to the `Customer` group. This workflow has been verified on AWS. Existing users without a group require a one-time group assignment; Agent creation and assignment remain admin-controlled.
 
@@ -90,10 +90,77 @@ That runs the backend tests (including S3 validation), Cognito trigger unit chec
 
 ## Limitations / security notes
 
-- AWS frontend not hosted: this project serves the UI via local Vite, not CloudFront.
+- The frontend is hosted through an AWS Lambda Function URL. CloudFront deployment was blocked by AWS account-verification restrictions.
 - A Cognito group must be present in the access token; no-group and dual-group users are rejected. The post-confirmation trigger only handles *future* newly confirmed self-registrations after deployment.
 - File uploads are limited to one per ticket, restricted to PNG/JPEG/PDF/TXT and 5 MiB. MIME type is checked, but file contents are not malware-scanned; S3 objects are private and signed links expire.
 - Orphaned pending files are subject to a 1-day lifecycle rule; S3 cleanup is asynchronous. Rare database/S3 partial failures may need manual reconciliation.
 - IAM for the `tickdesk-builder` development profile has broad administrative permissions; narrow these for a production rollout. The Cognito onboarding trigger IAM scope is restricted to user pools in the AWS account/region because a per-pool reference would produce a CloudFormation dependency cycle.
 - The $5 AWS Budget is a **notification, not a hard spending cap**. Delete unneeded retained S3 objects and other test resources when finished.
 - No SLA, HA, concurrency guarantee, malware scanning, large-file multipart support, or production-grade account recovery is claimed for this POC.
+
+## Live AWS deployment
+
+**Public website:**
+https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws/
+
+TickDesk is deployed using the following AWS services:
+
+| Service | Purpose |
+|---|---|
+| AWS Lambda Function URL | Public HTTPS Vue frontend |
+| Amazon Cognito | User signup, login and Customer/Agent roles |
+| Amazon API Gateway | JWT-protected backend endpoints |
+| AWS Lambda | Ticketing business logic |
+| Amazon DynamoDB | Tickets, comments and activity |
+| Amazon S3 | Private ticket attachments |
+
+### CloudFormation stacks
+
+- `tickdesk-poc-auth` — Cognito authentication
+- `tickdesk-poc-data` — DynamoDB tables
+- `tickdesk-poc-api` — Ticketing API and private S3 attachments
+- `tickdesk-poc-frontend-web` — Public Vue frontend
+
+### Frontend deployment
+
+The frontend hosting implementation is located in:
+
+- `frontend-hosting/handler.mjs`
+- `infrastructure/frontend-lambda.yaml`
+
+The built frontend files are generated rather than committed.
+
+To rebuild and deploy the frontend:
+
+1. Configure `frontend/.env.local` using the AWS values documented above.
+2. Run `npm run build`.
+3. Run `mkdir -p frontend-hosting/site`.
+4. Run `cp -a frontend/dist/. frontend-hosting/site/`.
+5. Deploy using AWS SAM with the following command:
+
+`sam deploy --template-file infrastructure/frontend-lambda.yaml --stack-name tickdesk-poc-frontend-web --region ap-south-1 --profile tickdesk-builder --resolve-s3 --capabilities CAPABILITY_IAM`
+
+### Verified functionality
+
+- Public HTTPS frontend access
+- Cognito Customer login and automatic Customer-group assignment
+- Customer and Agent ticket workflows
+- Ticket creation, editing, searching and filtering
+- Comments and activity history
+- Private S3 attachment upload and download
+- Customer authorization restrictions
+
+The public frontend was tested against the deployed AWS backend.
+
+### CloudFront limitation
+
+CloudFront was attempted, but AWS rejected distribution creation
+because the account requires additional verification.
+
+For this POC, the Vue frontend is successfully hosted through
+an AWS Lambda Function URL instead.
+
+### Costs
+
+AWS resources may incur charges. AWS Budget alerts do not
+automatically stop spending.

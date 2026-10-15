@@ -5,18 +5,19 @@ export function createServer() {
   return http.createServer((req, res) => {
     const cognitoMode = process.env.AUTH_MODE === "cognito";
     const origin = req.headers.origin;
-    const allowedOrigin = process.env.CORS_ORIGIN ||
-      "http://localhost:5173";
+    const allowedOrigins = (
+      process.env.CORS_ORIGIN || "http://localhost:5173"
+    ).split(",").map(value => value.trim()).filter(Boolean);
 
     if (cognitoMode) {
-      if (origin && origin !== allowedOrigin) {
+      if (origin && !allowedOrigins.includes(origin)) {
         res.writeHead(403);
         res.end();
         return;
       }
 
       if (origin) {
-        res.setHeader("access-control-allow-origin", allowedOrigin);
+        res.setHeader("access-control-allow-origin", origin);
         res.setHeader("vary", "Origin");
       }
     } else {

@@ -30,3 +30,9 @@ backend/data/db.json
 dist/
 .env
 .lambda-source/
+
+frontend-hosting/site/
+
+/IMPLEMENTATION_PLAN.md
+/FINAL_SUBMISSION.md
+/frontend-hosting/site/

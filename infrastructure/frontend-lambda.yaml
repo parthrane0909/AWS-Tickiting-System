@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TickDesk public Vue frontend using Lambda Function URL
+
+Resources:
+  FrontendSiteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../frontend-hosting/
+      Handler: handler.handler
+      Runtime: nodejs22.x
+      MemorySize: 128
+      Timeout: 10
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+
+Outputs:
+  PublicWebsiteUrl:
+    Description: Public HTTPS address for TickDesk
+    Value: !GetAtt FrontendSiteFunctionUrl.FunctionUrl
+
+  FrontendFunctionName:
+    Value: !Ref FrontendSiteFunction

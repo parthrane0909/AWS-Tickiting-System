@@ -137,8 +137,10 @@ Resources:
         - profile
       CallbackURLs:
         - http://localhost:5173/auth/callback
+        - https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws/auth/callback
       LogoutURLs:
         - http://localhost:5173/
+        - https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws/
 
   TicketingDomain:
     Type: AWS::Cognito::UserPoolDomain

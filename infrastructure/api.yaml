@@ -17,6 +17,9 @@ Parameters:
   FrontendOrigin:
     Type: String
     Default: http://localhost:5173
+  PublicFrontendOrigin:
+    Type: String
+    Default: https://zju6yyayrvc22msohephc6ljau0dthtm.lambda-url.ap-south-1.on.aws
 
 Globals:
   Function:
@@ -45,6 +48,7 @@ Resources:
       CorsConfiguration:
         AllowOrigins:
           - !Ref FrontendOrigin
+          - !Ref PublicFrontendOrigin
         AllowMethods:
           - GET
           - POST
@@ -82,7 +86,7 @@ Resources:
           TICKETS_TABLE: !Ref TicketsTableName
           COMMENTS_TABLE: !Ref CommentsTableName
           ACTIVITIES_TABLE: !Ref ActivitiesTableName
-          CORS_ORIGIN: !Ref FrontendOrigin
+          CORS_ORIGIN: !Join [",", [!Ref FrontendOrigin, !Ref PublicFrontendOrigin]]
           ATTACHMENTS_BUCKET: !Ref TicketingAttachmentsBucket
 
       Policies:
@@ -172,6 +176,7 @@ Resources:
         CorsRules:
           - AllowedOrigins:
               - !Ref FrontendOrigin
+              - !Ref PublicFrontendOrigin
             AllowedMethods:
               - POST
               - GET
